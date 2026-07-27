@@ -1,5 +1,167 @@
 # Content and assets
 
-> [!NOTE]
-> Stub. Should cover: the content pipeline, asset types and importers, the cooker, and the
-> `.apak` packaging format.
+Everything a game loads lives under `Content/`, and the engine handles it in two distinct ways. The
+distinction runs through the importer, the cooker and the runtime, so it is worth getting straight
+first.
+
+**Assets** are imported, stored in the engine's own container format, and referenced by **GUID**. A
+`.png` becomes a texture asset; an `.fbx` becomes a model asset. Nothing refers to them by path at
+runtime — a scene holds an id, and the id is resolved through the asset registry.
+
+**Content files** never become assets and are opened by **path**: Lua scripts, RML documents and
+RCSS stylesheets, fonts, FMOD banks. They stay as ordinary files under `Content/`, and third-party
+libraries that insist on a real path (RmlUi, FMOD) can be handed one.
+
+Both survive into a cooked game; the routes there differ.
+
+## Assets
+
+An asset file is `.ap` — a chunked container with a header, a type name, a serialized version and
+up to sixteen data chunks. `Content` is the static service that loads them:
+
+```csharp
+var texture = Content.Load<Texture>(id);
+var material = Content.LoadAsync<Material>(path);   // editor: by path
+```
+
+Loading is asynchronous and reference-counted. `AssetReference<T>` and `SoftAssetReference<T>`
+(which does not force a load) are how a C++ or C# type holds one; both serialize and both null
+themselves when the target goes away.
+
+### Importing
+
+The importers live in `Source/Engine/ContentImporters/` and are invoked by dropping a file into
+`Content/` in the editor:
+
+| Importer | Handles |
+| --- | --- |
+| `ImportTexture` | Textures and cube textures. |
+| `ImportModel` | Models and skinned models, with their skeletons and animations. |
+| `ImportAudio` | Audio data. |
+| `ImportFont` | Font assets. |
+| `ImportShader` | Shader sources. |
+| `ImportIES` | IES light profiles. |
+
+Alongside them the `Create*` factories mint an empty asset of a given type — materials, animation
+graphs, particle emitters, behaviour trees, JSON assets, raw data.
+
+Import settings are stored with the asset, so re-importing the source file keeps them. Deleting the
+`.ap` and re-dropping the source does not.
+
+### The registry
+
+`AssetsCache` maps ids to paths and type names. It is what makes `Content.Load` by id work without
+scanning the disk, and what the cooker rebuilds for the packaged game. In the editor it is kept in
+sync as files appear, move and disappear.
+
+### Streaming
+
+`Streaming` manages residency for the asset types that support it — textures and models load their
+low mip levels or LODs first and stream the rest based on what is actually being drawn.
+`Apogee.Content.IsResident` and `GetMemoryUsage` report what is currently in memory, which is the
+first thing to look at when a build's memory is larger than expected.
+
+## Content files
+
+`ContentFiles` is the path-based reader, and it resolves both storage modes behind one API:
+
+```csharp
+if (ContentFiles::Exists(TEXT("UI/hud.rml")))
+{
+    Array<byte> bytes;
+    ContentFiles::ReadAllBytes(TEXT("UI/hud.rml"), bytes);   // returns true on failure
+}
+```
+
+Paths are normalized to a canonical Content-relative form — forward slashes, no leading separator,
+no `Content/` prefix — so `Content/UI/hud.rml`, `UI/hud.rml` and an absolute path under the project
+Content folder are all the same key.
+
+Two resolution rules matter:
+
+- **Loose files win over packed ones.** That is what makes a packed build patchable: dropping a
+  file next to the executable overrides the packed copy without rebuilding the package. In the
+  editor, where nothing is packed, it is simply the only path that ever hits.
+- **The project's Content folder is checked before the engine's.** This is what lets a project
+  shadow an engine-shipped file — replacing `css/theme.lua` to restyle the whole UI, for instance —
+  by putting its own copy at the same Content-relative path.
+
+`GetLooseFilePath` returns the real path on disk, or an empty string when the file exists only
+inside a package. Callers that need a genuine file (a third-party library that opens it itself) use
+that and fall back to reading the bytes.
+
+## Cooking a game
+
+`GameCooker` runs an ordered list of steps:
+
+| Step | What it does |
+| --- | --- |
+| `ValidateStep` | Checks the build configuration and target platform. |
+| `CompileScriptsStep` | Builds the game's native and managed code for the target. |
+| `DeployDataStep` | Copies the engine and platform runtime data into the output. |
+| `PrecompileAssembliesStep` | AOT-compiles managed assemblies where the platform requires it. |
+| `CollectAssetsStep` | Walks the scenes and their references to find every asset the build needs. |
+| `CookAssetsStep` | Converts each asset to its platform form and writes the content packages. |
+| `PostProcessStep` | Platform-specific finishing — signing, bundling, packaging. |
+
+Only what is reachable is cooked. An asset nothing references does not ship — which is why a plugin
+implements `GamePlugin::GetReferences()` to declare content the walk would otherwise miss.
+
+Run it from the editor's build dialog, or headlessly:
+
+```bash
+ApogeeEditor -project ../MyGame -build MyPreset -exit
+```
+
+### Content packages
+
+Cooked assets are written into `.apak` packages. The same container format also backs `.adlc`
+(downloadable content) and `.amod` (a packaged mod); the runtime mounts all three the same way, so
+a mod and a DLC are simply additional package files.
+
+### Content files, at cook time
+
+`ContentFilesCooker` handles the files the asset pass never sees. It can deploy them two ways,
+selected by `BuildSettings.PackContentFiles`:
+
+- **Packed** (the default) — each file becomes a raw-bytes asset keyed by its Content path, inside
+  the content packages. Fewer files, and out of reach of casual editing.
+- **Loose** — copied into the game's `Content/` folder. Easier to patch and inspect.
+
+Both produce the same Content-relative paths, so nothing downstream — including the game — needs to
+know which mode a build used.
+
+Two exceptions to that:
+
+- **Lua scripts are precompiled.** A cooked build carries a `.luac` chunk in place of the `.lua`
+  source. Path resolution substitutes it transparently, which is why a `LuaScript` component's
+  **Script Path** should keep pointing at the `.lua` even for a shipping build.
+- **FMOD banks are always deployed loose**, so they can stream sample data off disk instead of
+  being held in memory.
+
+## From Lua
+
+`Apogee.Content` is a read-only view of the registry — useful for diagnostics, not for loading:
+
+```lua
+Apogee.Content.Exists('Scenes/Main.scene')
+Apogee.Content.GetTypeName(id)
+Apogee.Content.IsLoaded(id)
+Apogee.Content.GetMemoryUsage()
+```
+
+Scenes are loaded through `Apogee.Scene`, by **id** rather than by path — which is what
+`Apogee.Content.GetId` is for:
+
+```lua
+local id = Apogee.Content.GetId('Scenes/Level2.scene')
+Apogee.Scene.LoadAsync(id)
+-- async loads land between frames, so wait before assuming the actors exist
+if not Apogee.Scene.IsLoading() then ... end
+```
+
+Loading is always **additive** — it does not unload what is already open. Call
+`Apogee.Scene.UnloadAll()` first to swap scenes.
+
+Full API: [`Content`, `ContentFiles`, `Asset`](../../api-cpp/index.md) in C++,
+[`Apogee.Content`](../../api-lua/index.md) in Lua.
