@@ -1108,13 +1108,24 @@ public sealed partial class SolParser(SolParserOptions options)
         return full.Replace('\\', '/');
     }
 
-    /// <summary>The binding domain (Core, Math, Physics...) taken from the containing folder.</summary>
+    /// <summary>
+    /// The binding domain (Core, Math, Physics...) a symbol is filed under in the table of contents.
+    ///
+    /// Usually the containing folder. The per-domain entry points sit one level up as
+    /// `LuaBindings_&lt;Domain&gt;.cpp` and create the domain's root table there, so their name is
+    /// used instead — otherwise `Apogee.Audio` would file itself away from the rest of Audio.
+    /// </summary>
     private static string GroupOf(string path)
     {
         var directory = Path.GetFileName(Path.GetDirectoryName(path) ?? string.Empty);
-        return directory.Length == 0 || directory.Equals("Bindings", StringComparison.OrdinalIgnoreCase)
-            ? "Engine"
-            : directory;
+        if (directory.Length > 0 && !directory.Equals("Bindings", StringComparison.OrdinalIgnoreCase))
+            return directory;
+
+        var file = Path.GetFileNameWithoutExtension(path);
+        const string prefix = "LuaBindings_";
+        return file.StartsWith(prefix, StringComparison.Ordinal) && file.Length > prefix.Length
+            ? file[prefix.Length..]
+            : "Engine";
     }
 
     private static int LineOfArgument(SourceText source, string fragment)
