@@ -1,0 +1,86 @@
+name: Publish
+
+# The full build: clones the engine at the revision pinned in commit.txt, generates all three API
+# references, and deploys to GitHub Pages.
+#
+# Apogee.Engine is private, so this needs a credential to clone it. Create a fine-grained personal
+# access token with read access to the engine repository and store it as the ENGINE_TOKEN
+# repository secret. Without it the C++ and Lua steps have no sources to read and the job fails
+# early with a clear message rather than publishing a half-empty site.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A superseded deploy has nothing to contribute, but never cancel one already publishing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v4
+
+      - name: Check for the engine credential
+        env:
+          ENGINE_TOKEN: ${{ secrets.ENGINE_TOKEN }}
+        run: |
+          if [ -z "$ENGINE_TOKEN" ]; then
+            echo "::error::ENGINE_TOKEN is not set. Add a repository secret holding a token with" \
+                 "read access to Apogee.Engine; see .github/workflows/publish.yml."
+            exit 1
+          fi
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends doxygen
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Cache the engine checkout
+        # The engine is large and mostly unchanged between docs builds; build.sh fetches and
+        # resets to the pinned revision, so a stale cache is corrected rather than trusted.
+        uses: actions/cache@v4
+        with:
+          path: Apogee.Engine
+          key: engine-${{ hashFiles('commit.txt') }}
+          restore-keys: engine-
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Build the documentation
+        env:
+          APOGEE_ENGINE_REPO: https://x-access-token:${{ secrets.ENGINE_TOKEN }}@github.com/lheintzmann1/Apogee.Engine.git
+        run: ./build.sh all
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

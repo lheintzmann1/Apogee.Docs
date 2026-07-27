@@ -1,0 +1,29 @@
+# Engine checkout fetched by build.sh at the revision pinned in commit.txt. No trailing slash:
+# when the engine lives elsewhere this path is a symlink, which a directory-only pattern misses.
+/Apogee.Engine
+
+# Generated API metadata. Everything here is reproducible from the engine sources, so it is
+# built in CI rather than committed — that keeps the diff of a docs change readable.
+/api/**/*.yml
+/api/.manifest
+/api-cpp/*.yml
+/api-lua/*.yml
+/media/apogee.d.lua
+
+# Doxygen intermediates and the rendered site.
+/obj/
+/_site/
+/_exported_templates/
+log.txt
+
+# .NET build output for tools/Apogee.DocGen.
+[Bb]in/
+[Oo]bj/
+*.user
+
+# Editors and OS cruft.
+.vs/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

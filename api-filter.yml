@@ -1,0 +1,43 @@
+# Controls which C# API members DocFX includes.
+#
+# Only the managed side needs a filter: the C++ and Lua generators do their own filtering from
+# docgen.json. Anything hidden from the editor or marked as not browsable is hidden here too,
+# on the grounds that if it is not meant to be discovered in the editor it is not public API.
+
+apiRules:
+  - exclude:
+      hasAttribute:
+        uid: System.ComponentModel.EditorBrowsableAttribute
+        ctorArguments:
+          - System.ComponentModel.EditorBrowsableState.Never
+  - exclude:
+      hasAttribute:
+        uid: Apogee.HideInEditorAttribute
+  - exclude:
+      uidRegex: ^Apogee\..*\.Internal[^.]*$
+      type: Type
+  # Bindings glue emitted by Apogee.Build; an implementation detail of the interop layer.
+  - exclude:
+      uidRegex: ^Apogee\.Interop$
+      type: Namespace
+
+attributeRules:
+  # Attributes worth showing on a member, everything else is noise from the compiler and BCL.
+  - include:
+      uidRegex: ^System\.(Obsolete|Flags|Serializable)Attribute$
+      type: Type
+  - include:
+      uidRegex: ^Apogee\.
+      type: Type
+  - exclude:
+      uidRegex: ^System\.Runtime\.CompilerServices\.
+      type: Type
+  - exclude:
+      uidRegex: ^System\.Diagnostics\.
+      type: Type
+  - exclude:
+      uidRegex: ^System\.Reflection\.
+      type: Type
+  - exclude:
+      uidRegex: ^System\.CodeDom\.Compiler\.GeneratedCodeAttribute$
+      type: Type

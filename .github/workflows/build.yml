@@ -1,0 +1,42 @@
+name: Build
+
+# Validates changes without needing the engine. Pull requests to this repository are almost
+# always prose edits, and making every one of them wait on an engine clone and a C# build would
+# be a poor trade — the full three-API build runs on publish, and can be triggered by hand.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  manual:
+    name: Manual and tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Restore tools
+        run: dotnet tool restore
+
+      - name: Build Apogee.DocGen
+        run: dotnet build tools/Apogee.DocGen -c Release --nologo
+
+      - name: Build the site without the API references
+        # The three api* folders are empty here, so docfx builds the manual alone. This catches
+        # broken links, malformed TOC entries and bad front matter, which is what a prose change
+        # can actually break.
+        run: dotnet docfx build docfx.json --warningsAsErrors false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-preview
+          path: _site
+          retention-days: 7

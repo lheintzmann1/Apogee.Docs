@@ -1,0 +1,158 @@
+# Doxygen configuration for the Apogee Engine C++ API.
+#
+# This produces XML only. Apogee.DocGen converts that XML into DocFX pages under api-cpp/, so
+# Doxygen's own HTML output is never generated and its templates are irrelevant here.
+#
+# INPUT is left empty on purpose: build.sh appends it, because the engine checkout lives at a
+# path chosen at build time (a sibling clone locally, a CI clone pinned by commit.txt).
+
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "Apogee Engine"
+PROJECT_BRIEF          = "Apogee Engine C++ API"
+OUTPUT_DIRECTORY       = obj/doxygen
+CREATE_SUBDIRS         = NO
+OUTPUT_LANGUAGE        = English
+
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_RTF           = NO
+GENERATE_MAN           = NO
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+XML_PROGRAMLISTING     = NO
+XML_NS_MEMB_FILE_SCOPE = NO
+
+# ---- Input ------------------------------------------------------------------
+
+FILE_PATTERNS          = *.h *.hpp
+RECURSIVE              = YES
+EXCLUDE_SYMLINKS       = YES
+EXCLUDE_PATTERNS       = */ThirdParty/* \
+                         */Platforms/* \
+                         */obj/* \
+                         */Cache/* \
+                         */Binaries/* \
+                         */Tests/* \
+                         *.Gen.h
+EXAMPLE_PATTERNS       = *
+
+# ---- What to extract --------------------------------------------------------
+
+EXTRACT_ALL            = NO
+EXTRACT_PRIVATE        = NO
+EXTRACT_PACKAGE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = NO
+EXTRACT_LOCAL_METHODS  = NO
+EXTRACT_ANON_NSPACES   = NO
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+HIDE_FRIEND_COMPOUNDS  = YES
+HIDE_IN_BODY_DOCS      = NO
+INTERNAL_DOCS          = NO
+CASE_SENSE_NAMES       = YES
+HIDE_SCOPE_NAMES       = NO
+SHOW_INCLUDE_FILES     = NO
+SORT_MEMBER_DOCS       = NO
+SORT_BRIEF_DOCS        = NO
+SORT_MEMBERS_CTORS_1ST = YES
+INLINE_INFO            = YES
+
+# ---- Comment style ----------------------------------------------------------
+
+# Apogee documents with XML comments (/// <summary>, <param>, <returns>). Doxygen understands
+# those natively and folds <summary> into the brief description.
+# Markdown is off because the comments are not markdown, and '*' or '_' in prose would otherwise
+# be reinterpreted; Apogee.DocGen emits markdown on the way out instead.
+MARKDOWN_SUPPORT       = NO
+AUTOLINK_SUPPORT       = NO
+JAVADOC_AUTOBRIEF      = NO
+QT_AUTOBRIEF           = NO
+MULTILINE_CPP_IS_BRIEF = NO
+INHERIT_DOCS           = YES
+DISTRIBUTE_GROUP_DOC   = NO
+TAB_SIZE               = 4
+BUILTIN_STL_SUPPORT    = NO
+TYPEDEF_HIDES_STRUCT   = NO
+
+ALIASES                = "apiNote=@par API Note:\n"
+
+# ---- Preprocessing ----------------------------------------------------------
+#
+# The scripting-binding macros (API_CLASS, API_FUNCTION, ...) are consumed by the engine's own
+# bindings generator and carry no meaning for documentation, so they are expanded to nothing.
+# Leaving them in place makes Doxygen mis-parse the declaration that follows and attribute the
+# member to a phantom type.
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+SEARCH_INCLUDES        = NO
+SKIP_FUNCTION_MACROS   = YES
+
+PREDEFINED             = "API_CLASS(...)=" \
+                         "API_STRUCT(...)=" \
+                         "API_INTERFACE(...)=" \
+                         "API_ENUM(...)=" \
+                         "API_FUNCTION(...)=" \
+                         "API_PROPERTY(...)=" \
+                         "API_FIELD(...)=" \
+                         "API_EVENT(...)=" \
+                         "API_PARAM(...)=" \
+                         "API_TYPEDEF(...)=" \
+                         "API_INJECT_CODE(...)=" \
+                         "API_AUTO_SERIALIZATION(...)=" \
+                         "AENGINE_API=" \
+                         "APOGEE_API=" \
+                         "PACK_STRUCT(x)=x" \
+                         "ALIGN_BEGIN(x)=" \
+                         "ALIGN_END(x)=" \
+                         "FORCE_INLINE=inline" \
+                         "NO_INLINE=" \
+                         "DEPRECATED(...)=" \
+                         "DECLARE_SCENE_OBJECT(x)=" \
+                         "DECLARE_SCENE_OBJECT_ABSTRACT(x)=" \
+                         "DECLARE_SCRIPTING_TYPE(x)=" \
+                         "DECLARE_SCRIPTING_TYPE_MINIMAL(x)=" \
+                         "DECLARE_SCRIPTING_TYPE_NO_SPAWN(x)=" \
+                         "DECLARE_SCRIPTING_TYPE_STRUCTURE(x)=" \
+                         "DECLARE_SCRIPTING_TYPE_WITH_CONSTRUCTOR_IMPL(...)=" \
+                         "DECLARE_ASSET_HEADER(x)=" \
+                         "DECLARE_BINARY_ASSET_HEADER(...)=" \
+                         "DECLARE_ENGINE_SERVICE_EVENT(...)=" \
+                         "DECLARE_ENUM_OPERATORS(x)=" \
+                         "DECLARE_SHADER_META_READER_HEADER(...)=" \
+                         "DEFINE_DEFAULT_FORMATTING(...)=" \
+                         "DEFINE_DEFAULT_FORMATTING_VIA_TO_STRING(...)=" \
+                         "USE_EDITOR=1" \
+                         "USE_CSHARP=1" \
+                         "COMPILE_WITH_PROFILER=1" \
+                         "BUILD_DEVELOPMENT=1" \
+                         "PLATFORM_LINUX=1" \
+                         "PLATFORM_64BITS=1" \
+                         "PLATFORM_DESKTOP=1"
+
+# ---- Diagnostics ------------------------------------------------------------
+
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+WARN_AS_ERROR          = NO
+WARN_LOGFILE           = obj/doxygen/doxygen.log
+
+# ---- Off ---------------------------------------------------------------------
+
+HAVE_DOT               = NO
+CLASS_GRAPH            = NO
+COLLABORATION_GRAPH    = NO
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
+GENERATE_TODOLIST      = NO
+GENERATE_TESTLIST      = NO
+GENERATE_BUGLIST       = NO
+GENERATE_DEPRECATEDLIST = YES
+ALPHABETICAL_INDEX     = NO
+SOURCE_BROWSER         = NO
+VERBATIM_HEADERS       = NO

@@ -1,0 +1,45 @@
+{
+  // Configuration for tools/Apogee.DocGen, which turns the engine sources into DocFX metadata.
+  // Paths are relative to this file. See README.md for how the pieces fit together.
+
+  "engineRoot": "Apogee.Engine",
+  "doxygenXml": "obj/doxygen/xml",
+
+  "cpp": {
+    "output": "api-cpp",
+
+    // Template plumbing and type traits: real code, but nothing a game author calls.
+    "excludeTypes": [
+      "^Td?Is[A-Z]",
+      "^T(Enable|Remove|Add|Decay|Is)[A-Z]",
+      "^std::",
+      "Impl$",
+      "^Internal"
+    ],
+
+    // Vendored code, platform back-ends and build tooling are not part of the public API.
+    "excludePaths": [
+      "Source/ThirdParty/",
+      "Source/Platforms/",
+      "Source/Tools/",
+      "Source/Engine/Tests/"
+    ],
+
+    "includeProtected": true
+  },
+
+  "lua": {
+    "output": "api-lua",
+    "sources": [ "Source/Engine/LuaScripting/Bindings" ],
+
+    // LuaCATS definitions, published with the site so authors can wire up editor completion.
+    "definitions": "media/apogee.d.lua",
+
+    "rootVariable": "apogee",
+    "rootPath": "Apogee",
+
+    // Resolve bindings that forward to a C++ member (&Actor::GetName) against the Doxygen data,
+    // so they inherit the native signature and the summary written in the header.
+    "useNativeIndex": true
+  }
+}

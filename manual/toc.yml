@@ -1,0 +1,51 @@
+- name: Overview
+  href: index.md
+
+- name: Getting started
+  items:
+    - name: Building the engine
+      href: getting-started/building.md
+    - name: Your first project
+      href: getting-started/first-project.md
+
+- name: Scripting
+  items:
+    - name: Overview
+      href: scripting/index.md
+    - name: Lua
+      href: scripting/lua.md
+    - name: Lua editor setup
+      href: scripting/lua-editor-setup.md
+    - name: C#
+      href: scripting/csharp.md
+    - name: C++
+      href: scripting/cpp.md
+
+- name: User interface
+  items:
+    - name: Overview
+      href: ui/index.md
+    - name: RmlUi
+      href: ui/rmlui.md
+    - name: The apogee-ui framework
+      href: ui/apogee-ui.md
+
+- name: Systems
+  items:
+    - name: Rendering
+      href: systems/rendering.md
+    - name: Physics
+      href: systems/physics.md
+    - name: Audio
+      href: systems/audio.md
+    - name: Content and assets
+      href: systems/content.md
+    - name: Modding
+      href: systems/modding.md
+
+- name: Contributing
+  items:
+    - name: Writing documentation
+      href: contributing/index.md
+    - name: Documenting the APIs
+      href: contributing/documenting-the-api.md

@@ -1,0 +1,38 @@
+/* Apogee documentation theme overrides on top of DocFX's "modern" template.
+   Kept deliberately small: the aim is to make the three API references and the manual read as
+   one site, not to re-skin DocFX. */
+
+:root {
+    --apogee-accent: #4b8bf5;
+    --apogee-lua: #3b6fd4;
+}
+
+/* Syntax blocks in the API reference carry the declaration, so give them room to breathe. */
+.codewrapper pre {
+    line-height: 1.5;
+}
+
+/* Language badges. The three references share a layout, so the language needs to be obvious
+   at a glance rather than only from the URL. */
+article[data-lang]::before {
+    content: attr(data-lang);
+    display: inline-block;
+    margin-bottom: 0.75rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: var(--apogee-accent);
+    color: #fff;
+}
+
+/* Inferred-signature notes should read as a caveat, not as body text. */
+.NOTE, .WARNING {
+    border-left-width: 3px;
+}
+
+/* Member tables in the API pages get long; keep the name column from collapsing. */
+table.table > tbody > tr > td:first-child {
+    white-space: nowrap;
+}
