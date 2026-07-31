@@ -134,12 +134,12 @@ the startup project.
 
 ## Shader assets
 
-`Content/Shaders/*.ap` is generated from `Source/Shaders/*.shader` by `Apogee.Build` and is not
+`Content/Shaders/*.ashader` is generated from `Source/Shaders/*.shader` by `Apogee.Build` and is not
 committed. A shader asset is a container wrapping the source text under a deterministic id, so it
 is a pure function of the `.shader` beside it — see
 [Rendering](../systems/rendering.md#shaders-and-materials). The build regenerates it
 automatically; `ApogeeEditor -reimportshaders` does only that and exits, which is occasionally
-useful in CI.
+useful in CI — see [Editor command line](../editor/command-line.md) for the rest of the switches.
 
 ## Troubleshooting
 

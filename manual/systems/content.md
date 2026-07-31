@@ -16,8 +16,48 @@ Both survive into a cooked game; the routes there differ.
 
 ## Assets
 
-An asset file is `.ap` — a chunked container with a header, a type name, a serialized version and
-up to sixteen data chunks. `Content` is the static service that loads them:
+An asset file is a chunked container with a header, a type name, a serialized version and up to
+sixteen data chunks. Its extension names the *domain* it belongs to — `.atex` for a texture,
+`.amesh` for a model, `.amat` for a material:
+
+| Extension | Asset types |
+| --- | --- |
+| `.atex` | `Texture`, `CubeTexture`, `SpriteAtlas`, `IESProfile` |
+| `.amesh` | `Model`, `SkinnedModel` |
+| `.amat` | `Material`, `MaterialInstance`, `MaterialFunction` |
+| `.ashader` | `Shader` |
+| `.afont` | `FontAsset` |
+| `.aanim` | `Animation`, `AnimationGraph`, `AnimationGraphFunction`, `SkeletonMask`, `SceneAnimation` |
+| `.afx` | `ParticleEmitter`, `ParticleEmitterFunction`, `ParticleSystem` |
+| `.adata` | `BehaviorTree`, `VisualScript`, `GameplayGlobals`, `RawDataAsset` |
+| `.ap` | Anything with no registered domain, and every asset written before the split. |
+
+They are all the same container, read by the same code. **The extension is a convention, not a
+loader selector** — loading is driven by the header magic and the type name stored inside, so a
+mislabelled file still loads. What the extension buys is everything that selects assets by glob:
+mod packaging rules, Git LFS and `.gitattributes` entries, review filters, `escrow_ignore
+'**/*.atex'`.
+
+`AssetExtensions` is the table behind it. A game or mod that adds its own asset type inherits a
+domain from whichever built-in type it derives from, or claims its own:
+
+```csharp
+AssetExtensions.Register("MyGame.DialogueTree", "adlg");
+```
+
+`.ap` stays readable forever. To rename assets that still use it, run the editor once with
+`-migrateassets`:
+
+```bash
+ApogeeEditor -project ../MyGame -migrateassets
+```
+
+It reads each asset's type out of its header — handling every storage version, which is why this is
+an engine command and not a script — and renames the file to match. Asset references are GUIDs, so
+nothing that points at them needs updating. Re-importing an asset migrates it too. See
+[Editor command line](../editor/command-line.md) for the other one-shot editor commands.
+
+`Content` is the static service that loads them:
 
 ```csharp
 var texture = Content.Load<Texture>(id);
@@ -46,7 +86,7 @@ Alongside them the `Create*` factories mint an empty asset of a given type — m
 graphs, particle emitters, behaviour trees, JSON assets, raw data.
 
 Import settings are stored with the asset, so re-importing the source file keeps them. Deleting the
-`.ap` and re-dropping the source does not.
+asset file and re-dropping the source does not.
 
 ### The registry
 

@@ -64,7 +64,7 @@ overdraw, Global SDF); those go through the same passes rather than a separate p
 Two different things share the word "shader" here:
 
 **Shader assets** are HLSL. Sources live in `Source/Shaders/*.shader` (with `.hlsl` includes), and
-`Apogee.Build` generates `Content/Shaders/*.ap` from them. That generated asset is *not* compiled
+`Apogee.Build` generates `Content/Shaders/*.ashader` from them. That generated asset is *not* compiled
 bytecode — it is a single-chunk asset container wrapping the (obfuscated) source text, with an id
 derived deterministically from the shader's name. Bytecode is produced later, per platform and per
 permutation: by the editor into the project cache, or by the cooker into the packaged game.

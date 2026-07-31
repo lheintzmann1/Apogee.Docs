@@ -8,6 +8,11 @@
     - name: Your first project
       href: getting-started/first-project.md
 
+- name: Editor
+  items:
+    - name: Command line
+      href: editor/command-line.md
+
 - name: Scripting
   items:
     - name: Overview
