@@ -55,6 +55,12 @@ The engine is not vendored here. `build.sh` resolves it in this order:
    used as-is, and the build warns that it is not the pinned revision.
 3. Otherwise `./Apogee.Engine`, cloned and hard-reset to the revision in `commit.txt`.
 
+For the checkout `build.sh` owns (3), moving to a different revision also deletes the engine's
+`Binaries/`. That directory is gitignored, so `git checkout` leaves it alone, and in CI it is
+restored from the cache along with everything else — see the note under **C#** below for why a
+stale one is worse than a missing one. The revision it was built from is recorded in
+`.docs-built-revision`. A checkout you supplied yourself (1 or 2) is never touched.
+
 To publish against a newer engine, update `commit.txt` and push. Wherever the checkout lives, it
 is exposed at `./Apogee.Engine` (via a symlink when necessary) because `docfx.json` and
 `docgen.json` refer to it by that fixed path.
@@ -67,6 +73,12 @@ documentation file the engine build emits beside it, and writes DocFX metadata i
 It reads the *assembly*, not `Source/Apogee.CSharp.csproj`, because that project file is generated
 by `Apogee.Build`, lists roughly 1500 sources and depends on engine-specific MSBuild targets that
 Roslyn cannot load standalone. `build.sh cs` builds the bindings first if the assembly is missing.
+
+This is the only reference generated from build output rather than from sources, which makes it the
+only one that can go stale without failing: an assembly built from an older engine produces a
+complete, plausible C# reference for the wrong revision, while the C++ and Lua references move on
+without it. The build logs which assembly it read, and a revision change discards the previous
+build output.
 
 Filtering lives in `api-filter.yml`; members marked `[HideInEditor]` or
 `[EditorBrowsable(Never)]` are excluded.

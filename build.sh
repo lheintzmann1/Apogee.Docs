@@ -84,6 +84,29 @@ fetch_engine() {
     else
         warn "git-lfs is not installed; the engine checkout will contain LFS pointers."
     fi
+
+    discard_stale_binaries
+}
+
+# Binaries/ is gitignored in the engine, so checking out a different revision leaves whatever the
+# last build produced sitting there. In CI that directory also arrives from the restore-keys cache
+# fallback, carried over from an older revision. The C# reference is read out of the built
+# assembly, so a stale one does not fail — it quietly documents the wrong engine, while the C++ and
+# Lua references (generated from the sources) move on without it. Keep the invariant explicit:
+# Binaries, if present, was built from the revision now checked out.
+discard_stale_binaries() {
+    local head stamp
+    head="$(git -C "$ENGINE_DIR" rev-parse HEAD)"
+    stamp="$ENGINE_DIR/.docs-built-revision"
+
+    if [ "$(cat "$stamp" 2>/dev/null || true)" = "$head" ]; then
+        return
+    fi
+    if [ -d "$ENGINE_DIR/Binaries" ]; then
+        info "Engine revision changed — discarding build output from the previous one"
+        rm -rf "$ENGINE_DIR/Binaries"
+    fi
+    printf '%s\n' "$head" > "$stamp"
 }
 
 # ---- API generation ----------------------------------------------------------
@@ -140,7 +163,9 @@ build_cs() {
         warn "No Apogee.CSharp.xml next to the assembly — the C# API will have no descriptions."
     fi
 
-    info "Extracting the C# API metadata (docfx metadata)"
+    # Name the assembly. This is the one API surface read from build output rather than from
+    # sources, so it is the one that can silently describe an engine nobody asked for.
+    info "Extracting the C# API metadata from ${binaries#"$ENGINE_DIR/"}"
     dotnet docfx metadata docfx.json
 }
 
