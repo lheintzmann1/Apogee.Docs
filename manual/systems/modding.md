@@ -52,6 +52,7 @@ ordinary content path and can ship assets alongside its scripts.
 | `optional_dependencies` | Load after these if present; do not drop if absent. |
 | `load_before`, `load_after` | Ordering only, no dependency implied. |
 | `incompatibilities` | Mods that cannot coexist with this one. |
+| `content` | Content items declared explicitly, for a mod that does not follow a content type's directory layout. See [Adding content](#adding-content). |
 
 ## Load order
 
@@ -138,6 +139,38 @@ in a state that no longer exists.
 
 Payloads are strings. Anything structured goes through whatever encoding both sides agree on;
 `ModManager::CallModFunction` takes JSON arguments for the same reason.
+
+## Adding content
+
+Hooks are one of the two things a mod does: they **change behaviour**. The other is **adding a
+thing of a known kind** — a car, a weapon, a perk — and that is [game content](game-content.md),
+which needs no hooks and usually no Lua at all.
+
+Every loaded mod is registered as a content *source*, so a mod only has to follow the directory
+layout the game declared for the type:
+
+```text
+Mods/example-cars/vehicles/van/
+    vehicle.json
+    van.amesh
+```
+
+That van becomes the item `example-cars:van`, and the game's `onAdd` for `vehicle` wires it into
+traffic and shops. Ids are namespaced by mod, so two mods can both ship a `van`. A mod that wants a
+different layout can name its content explicitly instead:
+
+```json
+"content": [
+  { "type": "vehicle", "path": "extras/secret_car/vehicle.json" }
+]
+```
+
+Content is registered after the entry script runs and before `OnLoad`, so the entry script may
+declare a content type of its own and `OnLoad` can already query what the mod contributed.
+Unloading a mod withdraws its items — the game's `onRemove` runs — before the mod's Lua state is
+destroyed, and `Apogee.Mods.Reload` therefore produces a clean remove-then-add for every item.
+
+See [Game content](game-content.md) for the type declaration, the schema and the reload contract.
 
 ## Failure isolation
 

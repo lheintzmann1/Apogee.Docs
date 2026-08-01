@@ -38,6 +38,32 @@ mislabelled file still loads. What the extension buys is everything that selects
 mod packaging rules, Git LFS and `.gitattributes` entries, review filters, `escrow_ignore
 '**/*.atex'`.
 
+### JSON assets
+
+Not every asset is a binary container. Scenes, prefabs, settings and localization tables are stored
+as **JSON text** — an object carrying an `"ID"` and a `"TypeName"` next to its data. They are
+assets in every other respect: registered by GUID, referenced the same way, cooked into the same
+packages.
+
+| Extension | Asset types |
+| --- | --- |
+| `.scene` | `Scene` |
+| `.prefab` | `Prefab` |
+| `.acfg` | `GameSettings` and every other settings object, plus any `JsonAsset` with no domain of its own |
+| `.alocale` | `LocalizedStringTable` |
+
+The same rule applies: the extension names the domain, the `TypeName` inside selects the loader.
+
+**`.json` is deliberately not in that table.** A plain `.json` under `Content/` is a
+[game content](game-content.md) data sheet — read by path, never an asset. The two used to share
+one extension, which meant telling them apart required parsing the file, and a data sheet that
+happened to carry `ID` and `TypeName` fields was mistaken for an asset and silently dropped from
+cooked builds. Splitting them removed the ambiguity in both directions.
+
+A project written before the split migrates with `ApogeeEditor -migrateassets`, which renames JSON
+assets to their domain and leaves plain data files alone — see
+[Command line](../editor/command-line.md).
+
 `AssetExtensions` is the table behind it. A game or mod that adds its own asset type inherits a
 domain from whichever built-in type it derives from, or claims its own:
 
@@ -161,8 +187,9 @@ a mod and a DLC are simply additional package files.
 
 ### Content files, at cook time
 
-`ContentFilesCooker` handles the files the asset pass never sees. It can deploy them two ways,
-selected by `BuildSettings.PackContentFiles`:
+`ContentFilesCooker` handles the files the asset pass never sees: Lua scripts, RML documents and
+stylesheets, font faces, FMOD banks, and `.json` [game content](game-content.md) data sheets. It
+can deploy them two ways, selected by `BuildSettings.PackContentFiles`:
 
 - **Packed** (the default) — each file becomes a raw-bytes asset keyed by its Content path, inside
   the content packages. Fewer files, and out of reach of casual editing.

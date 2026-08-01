@@ -47,6 +47,8 @@
       href: systems/content.md
     - name: Modding
       href: systems/modding.md
+    - name: Game content
+      href: systems/game-content.md
 
 - name: Contributing
   items:

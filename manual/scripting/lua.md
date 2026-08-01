@@ -16,7 +16,8 @@ end
 ## The shape of the API
 
 - **Modules** are plain tables: `Apogee.Time`, `Apogee.Log`, `Apogee.Screen`, `Apogee.Input`,
-  `Apogee.Actor`, `Apogee.Scene`, `Apogee.Physics`, `Apogee.Audio`, `Apogee.GameUI`.
+  `Apogee.Actor`, `Apogee.Scene`, `Apogee.Physics`, `Apogee.Audio`, `Apogee.GameUI`,
+  `Apogee.GameContent`.
 - **Classes** are sol2 usertypes — C++ types projected into Lua. `Apogee.Float3.new(1, 2, 3)`
   constructs one; methods are called with a colon.
 - **Enums** are tables of integer constants: `Apogee.Key.Space`, `Apogee.MouseButton.Left`.
@@ -91,6 +92,12 @@ rules are in [the apogee-ui page](../ui/apogee-ui.md#modules-and-require).
 
 Sharing state between scripts therefore goes through the engine rather than through Lua globals:
 actor tags, a component field, a UI data model, or an `Apogee.Hooks` broadcast.
+
+`Apogee.Mods` and `Apogee.Hooks` exist only inside a mod's state, so a gameplay script never sees
+them — they are documented on the [modding page](../systems/modding.md#the-sandbox).
+[`Apogee.GameContent`](../systems/game-content.md) is the exception in the other direction: it is
+built into *every* state, because the game declares content types from an ordinary script and mods
+are only one of the sources that fill them.
 
 ## Errors
 

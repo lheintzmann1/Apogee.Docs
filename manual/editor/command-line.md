@@ -42,7 +42,7 @@ non-zero exit code on failure, so a CI step can just check it.
 | `-build <preset>` or `-build <preset.target>` | Cooks the game with that build preset and exits. |
 | `-genprojectfiles` | Regenerates the scripts project files. |
 | `-reimportshaders` | Regenerates `Content/Shaders/*.ashader` from `Source/Shaders/*.shader`. See [Rendering](../systems/rendering.md#shaders-and-materials). |
-| `-migrateassets` | Renames every generic `.ap` asset under the engine and project content to the per-domain extension its type calls for. See [Content and assets](../systems/content.md#assets). |
+| `-migrateassets` | Renames assets to the per-domain extension their type calls for: generic `.ap` binary assets, and `.json` assets to `.acfg` or `.alocale`. Plain `.json` data files are left alone. See [Content and assets](../systems/content.md#assets). |
 | `-clearcache` | Clears the project cache folder. |
 | `-clearcooker` | Clears the Game Cooker cache folder. |
 | `-exit` | Exits once startup and every queued action has finished. Combine with anything above, or use alone as a "does this project still open?" smoke test. |
