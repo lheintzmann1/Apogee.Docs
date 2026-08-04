@@ -107,6 +107,7 @@ structure rather than text. `ui.fragment` groups siblings without introducing an
 | `ui.store(t)` | A table whose fields are signals — read `player.health`, write `player.health = 80`. |
 | `ui.root(fn)` / `ui.getOwner` / `ui.runWithOwner` / `ui.dispose` | Manual scope control. |
 | `ui.catchError(fn)` | Registers an error handler for the current scope and everything under it. |
+| `ui.resource(src, fetcher)` | An asynchronously fetched value, as reactive state. See [Async and resources](#async-and-resources). |
 
 Setters accept either a value or an updater function:
 
@@ -144,6 +145,89 @@ For UI that follows continuously changing engine state with no change event to h
 tracking a value that is simply read every frame — `ui.onFrame(fn)` runs `fn` once per frame before
 the context updates. It returns an unregister function and is also unregistered automatically when
 the enclosing scope is disposed.
+
+## Async and resources
+
+`ui.resource` turns something that takes time into reactive state:
+
+```lua
+local sceneId, setSceneId = ui.signal(nil)
+
+local scene, sceneActions = ui.resource(sceneId, function(id)
+  if not Apogee.Scene.LoadAsync(id) then
+    error('not a scene guid: ' .. tostring(id))
+  end
+  ui.wait(function() return not Apogee.Scene.IsLoading() end)
+  return id
+end)
+```
+
+```lua
+scene()          -- the value, or nil when there isn't one
+scene.loading    -- true while a fetch is in flight
+scene.error      -- whatever the fetcher threw, if it did
+scene.latest     -- the last value we ever had, even after a failure
+scene.state      -- 'unresolved' | 'pending' | 'ready' | 'refreshing' | 'errored'
+
+sceneActions.refetch()          -- run the fetcher again
+sceneActions.mutate(value)      -- set the value directly, without fetching
+```
+
+The source is optional — `ui.resource(fetcher)` fetches once. When a source is given, the fetcher
+re-runs whenever it changes, and a `nil` or `false` source means "there is nothing to fetch yet":
+the fetcher is not called and the resource sits in `unresolved`.
+
+### Writing a fetcher
+
+The fetcher always runs inside a coroutine, so it is written as straight-line code and suspends
+where it needs to:
+
+| Helper | What it does |
+| --- | --- |
+| `ui.wait(predicate)` | Suspends until `predicate()` reads true, checked once per frame. |
+| `ui.waitFrames(n)` | Suspends for `n` frames. |
+| `coroutine.yield()` | Resumes on the next frame. |
+
+That is the bridge to the engine's poll-based async — `Apogee.Scene.LoadAsync` with
+`Apogee.Scene.IsLoading()`, or `Apogee.Content.IsLoaded(guid)`. A fetcher that never suspends is
+not a special case: it resolves before `ui.resource` returns, so a refetch from a click handler
+repaints in the frame it was clicked.
+
+A fetcher signals failure by raising. Because it runs in a coroutine, that failure never reaches
+the reactive graph as an error — it becomes `.error`, and `refetch()` genuinely recovers. (An
+effect that throws is *parked* and never runs again; a resource that failed is not.)
+
+### Two differences from SolidJS
+
+`data()` keeps the previous value while `refreshing`, rather than reverting to nil. Without
+Suspense, reverting would blink the UI on every refetch.
+
+`data()` never throws. In Solid, reading a failed resource throws so an ErrorBoundary catches it;
+here that would park whichever computation read it, and would put the component holding your retry
+button inside the boundary that just replaced it. A failed load is a state you render. Pass
+`{ boundary = true }` if a branch genuinely cannot proceed without the value and should be replaced
+wholesale.
+
+Other options: `initialValue` (seeds `.latest`, and the first fetch starts in `refreshing`),
+`name` (for logs and the inspector), `equals`, and `quiet` (suppress the warning on failure).
+
+### There is no Suspense
+
+Suspense means showing a fallback while something below is loading *without tearing down what is
+below*. The only conditional rendering here is `element.dynamic`, which destroys and rebuilds — so
+a Suspense built on it would destroy the component holding the resource it is waiting for, remount,
+fetch again, and suspend again. Making it correct needs a hidden-render mode in the renderer.
+
+Branch on the state instead, which reads better anyway:
+
+```lua
+ui.Switch {
+  ui.Match { when = function() return scene.state == 'pending' end, Spinner {} },
+  ui.Match { when = function() return scene.error ~= nil end,
+    ui.button { onclick = sceneActions.refetch, 'Retry' } },
+  World { id = scene },
+}
+```
 
 ## Control flow
 
@@ -287,6 +371,34 @@ One consequence to know: edits to `css/theme.lua` do not appear until the *docum
 (touch its `.rml`, or restart play mode), because the injected rules are already in the document's
 style sheet and are not re-emitted. Component edits — which is what anyone is actually iterating
 on — are unaffected.
+
+## Inspecting a running UI
+
+RmlUi's debugger has an **Apogee UI** panel that reports on the framework rather than on the
+document it produced: the component/owner-scope tree, effect re-runs in the last flush, scheduler
+pass counts, elements per document, the utility-class cache and its size in bytes, and any
+in-flight resources.
+
+Open it with `Apogee.GameUI.ToggleDebugger()` — from the developer console, a gameplay script, or
+an options menu; there is no key binding, matching the console itself. Then click **Apogee UI** in
+the debugger's menu bar.
+
+Recording follows the panel's visibility, so a closed panel costs nothing. The *first* time it is
+opened in a session the UI modules are reloaded, because the framework's probe guards are captured
+as upvalues when each module loads; that restarts components from their initial state, exactly like
+any other hot reload. Closing the panel never reloads.
+
+Two things worth knowing:
+
+- With the panel open, every element the renderer creates carries `data-apogee-scope` and
+  `data-apogee-doc` attributes. RmlUi's own **Element Info** panel lists attributes, so selecting
+  any element there tells you which component produced it.
+- The numbers describe the *last completed* flush and exclude the panel's own work, so what you are
+  looking at cannot be an artefact of looking at it.
+
+For a headless run or a quick check from the console, `Apogee.GameUI.Inspector.Dump()` prints the
+same information as text, and `Apogee.GameUI.Inspector.SetEnabled(true)` starts recording without
+the debugger.
 
 ## World-space UIs
 

@@ -156,3 +156,40 @@ canvas.SetPointerButton(MouseButton.Left, pressed);
 
 Each canvas gets its own RmlUi context, so world-space UIs are fully independent of the full-screen
 stack and of each other.
+
+## The debugger
+
+RmlUi ships a visual debugger — the UI equivalent of a browser's dev tools. There is no key
+binding for it, matching the developer console; open it from the console, a gameplay script or an
+options menu:
+
+```lua
+Apogee.GameUI.ToggleDebugger()
+Apogee.GameUI.SetDebuggerVisible(true)
+Apogee.GameUI.IsDebuggerVisible()
+```
+
+Its panels are **Element Info** (the selected element's tree position, attributes and computed
+RCSS), **Event Log**, **Outlines** (draws every element's box), **Data Models**, and **Apogee UI** —
+which reports on the reactive framework rather than on the document, and is documented in
+[apogee-ui](apogee-ui.md#inspecting-a-running-ui).
+
+### Inspecting a world-space canvas
+
+By default the debugger inspects the full-screen `"main"` context, so an `RmlCanvas` is invisible to
+it. Point it at one by name — a canvas names its context after its actor's id:
+
+```lua
+Apogee.GameUI.SetDebuggerContext(tostring(actorId))
+Apogee.GameUI.SetDebuggerContext('main')          -- back to the full-screen stack
+```
+
+The debugger's own panels stay on the main screen either way. That is what you want: a canvas is
+painted onto a surface somewhere in the world, and you would not be able to read an inspector
+mapped onto it.
+
+### Version
+
+`Apogee.GameUI.GetRmlUiVersion()` returns the vendored RmlUi version, which the debugger also shows
+in its corner and which the engine logs at startup. It is recorded in
+`Source/ThirdParty/RmlUi/VENDOR.txt` and must be updated when RmlUi is re-vendored.

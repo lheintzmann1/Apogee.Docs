@@ -8,3 +8,11 @@ Apogee's UI is two layers:
 
 Game and editor UI is written against `apogee-ui`. Reach for RmlUi directly only when you need
 something the framework does not wrap.
+
+Two things worth knowing about early:
+
+- **[Async and resources](apogee-ui.md#async-and-resources)** — `ui.resource` for anything that
+  takes time to load, such as a scene or an asset.
+- **[Inspecting a running UI](apogee-ui.md#inspecting-a-running-ui)** — the debugger's Apogee UI
+  panel, which shows the component tree and what re-ran, next to RmlUi's own
+  [element inspector](rmlui.md#the-debugger).
