@@ -98,7 +98,7 @@ Apogee.Audio.PlayOneShot('event:/Weapons/Gunshot', position)
 feeds world position, orientation and derived velocity to the audio system. Put one on the camera
 or the player's head. Only one active listener is expected.
 
-If you are driving the listener yourself rather than from a scene actor, `AAudio::SetListener` /
+If you are driving the listener yourself rather than from a scene actor, `Audio::SetListener` /
 `Apogee.Audio.SetListener(position, forward, up, velocity)` takes it directly.
 
 ## Mixing
@@ -134,12 +134,12 @@ Two per-source switches, both off by default because both cost:
 Both also need scene geometry registered with the simulator:
 
 ```csharp
-var handle = AAudio.AddStaticMesh(vertices, indices);
+var handle = Audio.AddStaticMesh(vertices, indices);
 // ...
-AAudio.RemoveStaticMesh(handle);
+Audio.RemoveStaticMesh(handle);
 ```
 
-`AAudio.IsSpatialAudioReady` / `Apogee.Audio.IsSpatialAudioReady()` reports whether the Steam Audio
+`Audio.IsSpatialAudioReady` / `Apogee.Audio.IsSpatialAudioReady()` reports whether the Steam Audio
 pipeline initialized at all. When it did not, the sources still play — they just fall back to
 FMOD's own spatialization.
 
@@ -157,5 +157,5 @@ In rough order of likelihood:
 
 `Apogee.Audio.IsReady()` tells you whether the FMOD system came up at all.
 
-Full API: [`AAudio`, `AudioSource`, `AudioListener`, `AudioSettings`](../../api-cpp/index.md) in
+Full API: [`Audio`, `AudioSource`, `AudioListener`, `AudioSettings`](../../api-cpp/index.md) in
 C++, [`Apogee.Audio`](../../api-lua/index.md) in Lua.

@@ -175,7 +175,7 @@ Three shapes cover most of what gets written:
   see: `OnAwake`, `OnEnable`, `OnStart`, `OnUpdate`, `OnLateUpdate`, `OnFixedUpdate`, `OnDisable`,
   `OnDestroy`.
 - **A static service** — `API_CLASS(Static)` with `DECLARE_SCRIPTING_TYPE_NO_SPAWN`, for
-  process-wide systems: `Physics`, `Renderer`, `GameUI`, `AAudio`, `ContentFiles`. The public API
+  process-wide systems: `Physics`, `Renderer`, `GameUI`, `Audio`, `ContentFiles`. The public API
   is the static class; the state and the per-frame work live in a file-local subclass of `AEngine`,
   the engine service base, which gives it `Init`, `Update`, `FixedUpdate`, `Draw` and `Dispose`
   callbacks driven by the engine loop. `ModManager` is a compact example of the pattern.
