@@ -1176,8 +1176,9 @@ public sealed partial class SolParser(SolParserOptions options)
     /// The binding domain (Core, Math, Physics...) a symbol is filed under in the table of contents.
     ///
     /// Usually the containing folder. The per-domain entry points sit one level up as
-    /// `LuaBindings_&lt;Domain&gt;.cpp` and create the domain's root table there, so their name is
+    /// `Lua&lt;Domain&gt;Bindings.cpp` and create the domain's root table there, so their name is
     /// used instead — otherwise `Apogee.Audio` would file itself away from the rest of Audio.
+    /// `LuaBindings.cpp` names no domain and keeps the fallback.
     /// </summary>
     private static string GroupOf(string path)
     {
@@ -1186,9 +1187,12 @@ public sealed partial class SolParser(SolParserOptions options)
             return directory;
 
         var file = Path.GetFileNameWithoutExtension(path);
-        const string prefix = "LuaBindings_";
-        return file.StartsWith(prefix, StringComparison.Ordinal) && file.Length > prefix.Length
-            ? file[prefix.Length..]
+        const string prefix = "Lua";
+        const string suffix = "Bindings";
+        return file.StartsWith(prefix, StringComparison.Ordinal)
+            && file.EndsWith(suffix, StringComparison.Ordinal)
+            && file.Length > prefix.Length + suffix.Length
+            ? file[prefix.Length..^suffix.Length]
             : "Engine";
     }
 
