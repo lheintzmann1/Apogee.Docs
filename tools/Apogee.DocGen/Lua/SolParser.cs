@@ -30,6 +30,13 @@ public sealed partial class SolParser(SolParserOptions options)
     private readonly Dictionary<string, LuaSymbol> _symbols = new(StringComparer.Ordinal);
     private readonly List<string> _warnings = [];
 
+    /// <summary>
+    /// C++ enum name -> the name it is published under, where the two differ. Signatures are read
+    /// from the C++ declaration, so a parameter of an enum published under another name would
+    /// otherwise be typed as something Lua has never heard of.
+    /// </summary>
+    private readonly Dictionary<string, string> _publishedEnums = new(StringComparer.Ordinal);
+
     private RegistrarIndex _registrars = RegistrarIndex.Empty;
 
     public IReadOnlyList<string> Warnings => _warnings;
@@ -64,6 +71,8 @@ public sealed partial class SolParser(SolParserOptions options)
                 _warnings.Add($"{source.Path}: {ex.Message}");
             }
         }
+
+        RenamePublishedEnums();
 
         foreach (var symbol in _symbols.Values)
         {
@@ -194,6 +203,7 @@ public sealed partial class SolParser(SolParserOptions options)
                 var line = source.LineOf(captured.Index);
                 var symbol = Declare(Join(ownerPath, name), LuaSymbolKind.Enum, relative, line, group);
                 ApplyBanner(symbol, source, line);
+                RecordPublishedEnum(captured.Groups["native"].Value, symbol);
 
                 for (var i = 1; i + 1 < parts.Count; i += 2)
                 {
@@ -224,10 +234,12 @@ public sealed partial class SolParser(SolParserOptions options)
                     return;
                 var name = captured.Groups["name"].Value;
                 var line = source.LineOf(captured.Index);
+                var array = captured.Groups["array"].Value;
                 var symbol = Declare(Join(ownerPath, name), LuaSymbolKind.Enum, relative, line, group);
                 ApplyBanner(symbol, source, line);
+                RecordPublishedEnum(PairArrayType(source, array), symbol);
 
-                foreach (var (key, value, valueLine) in ReadPairArray(source, captured.Groups["array"].Value))
+                foreach (var (key, value, valueLine) in ReadPairArray(source, array))
                 {
                     AddMember(symbol, new LuaMember
                     {
@@ -1160,6 +1172,53 @@ public sealed partial class SolParser(SolParserOptions options)
         symbol.SeeAlso.AddRange(doc.SeeAlso);
     }
 
+    /// <summary>Notes that a C++ enum reaches Lua under a different name.</summary>
+    private void RecordPublishedEnum(string nativeType, LuaSymbol symbol)
+    {
+        var native = LuaTypes.Map(nativeType);
+        if (native.Length == 0 || native == "any" || native == symbol.Name)
+            return;
+        _publishedEnums[native] = symbol.Name;
+    }
+
+    /// <summary>
+    /// Retypes every signature written from a C++ enum that is published under another name —
+    /// <c>InputGamepadIndex</c> is <c>Apogee.Gamepad</c> in Lua, and naming the C++ enum in a Lua
+    /// signature points the reader at a type that does not exist.
+    /// </summary>
+    private void RenamePublishedEnums()
+    {
+        // A native name that is itself a bound Lua type is that type, not an alias for another.
+        foreach (var path in _symbols.Values.Select(s => s.Name).ToList())
+            _publishedEnums.Remove(path);
+
+        if (_publishedEnums.Count == 0)
+            return;
+
+        foreach (var member in _symbols.Values.SelectMany(s => s.Members))
+        {
+            foreach (var parameter in member.Parameters)
+                parameter.Type = RenamePublishedEnum(parameter.Type);
+            for (var i = 0; i < member.Returns.Count; i++)
+                member.Returns[i] = RenamePublishedEnum(member.Returns[i]);
+            if (member.ValueType is not null)
+                member.ValueType = RenamePublishedEnum(member.ValueType);
+        }
+    }
+
+    /// <summary>Swaps the name while keeping the <c>?</c> and <c>[]</c> the signature carries.</summary>
+    private string RenamePublishedEnum(string type)
+    {
+        var bare = type.TrimEnd('?');
+        var suffix = type[bare.Length..];
+        if (bare.EndsWith("[]", StringComparison.Ordinal))
+        {
+            bare = bare[..^2];
+            suffix = "[]" + suffix;
+        }
+        return _publishedEnums.TryGetValue(bare, out var published) ? published + suffix : type;
+    }
+
     private static string Join(string owner, string name) =>
         owner.Length == 0 ? name : owner + "." + name;
 
@@ -1296,11 +1355,23 @@ public sealed partial class SolParser(SolParserOptions options)
         return open < 0 ? string.Empty : ReadBalanced(expression, open, '(', ')');
     }
 
+    /// <summary>Finds a <c>static const std::pair&lt;const char*, E&gt; name[] = ...</c> declaration.</summary>
+    private static Match PairArrayDeclaration(SourceText source, string variable) =>
+        Regex.Match(source.Code,
+            @"std::pair\s*<\s*const\s+char\s*\*\s*,\s*(?<native>[^>]*?)\s*>\s+"
+            + Regex.Escape(variable) + @"\s*\[\s*\]\s*=");
+
+    /// <summary>The C++ enum such a table holds the values of.</summary>
+    private static string PairArrayType(SourceText source, string variable)
+    {
+        var declaration = PairArrayDeclaration(source, variable);
+        return declaration.Success ? declaration.Groups["native"].Value : string.Empty;
+    }
+
     /// <summary>Reads a <c>static const std::pair&lt;const char*, E&gt; name[] = {{"K", V}, ...}</c> table.</summary>
     private static IEnumerable<(string Key, string Value, int Line)> ReadPairArray(SourceText source, string variable)
     {
-        var declaration = Regex.Match(source.Code,
-            @"std::pair\s*<\s*const\s+char\s*\*\s*,[^>]*>\s+" + Regex.Escape(variable) + @"\s*\[\s*\]\s*=");
+        var declaration = PairArrayDeclaration(source, variable);
         if (!declaration.Success)
             yield break;
 
@@ -1327,7 +1398,7 @@ public sealed partial class SolParser(SolParserOptions options)
     [GeneratedRegex(@"(?:(?:auto|sol::usertype\s*<[^>]*>)\s+(?<var>\w+)\s*=\s*)?\b(?<owner>\w+)\s*\.\s*new_usertype\s*<")]
     private static partial Regex UsertypePattern();
 
-    [GeneratedRegex(@"\b(?<owner>\w+)\s*\.\s*new_enum\s*(?:<[^>]*>)?\s*\(")]
+    [GeneratedRegex(@"\b(?<owner>\w+)\s*\.\s*new_enum\s*(?:<\s*(?<native>[^>]*?)\s*>)?\s*\(")]
     private static partial Regex NewEnumPattern();
 
     [GeneratedRegex(@"\bPublishEnum\s*\(\s*(?<owner>\w+)\s*,\s*""(?<name>[^""]+)""\s*,\s*(?<array>\w+)\s*\)")]
