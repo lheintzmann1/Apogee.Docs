@@ -916,6 +916,8 @@ public sealed partial class SolParser(SolParserOptions options)
                     var declaration = ParameterPattern().Match(text);
                     var pname = declaration.Success ? declaration.Groups["name"].Value : "arg" + index;
                     var ptype = declaration.Success ? declaration.Groups["type"].Value : text;
+                    // A C array parameter is a Lua array of the element type.
+                    var array = declaration.Success && declaration.Groups["array"].Success;
 
                     if (text.Contains("sol::variadic_args", StringComparison.Ordinal))
                     {
@@ -924,7 +926,12 @@ public sealed partial class SolParser(SolParserOptions options)
                         continue;
                     }
 
-                    member.Parameters.Add(new LuaParameter { Name = pname, Type = context.Map(ptype) });
+                    var mapped = context.Map(ptype);
+                    member.Parameters.Add(new LuaParameter
+                    {
+                        Name = pname,
+                        Type = array ? mapped + "[]" : mapped,
+                    });
                     index++;
                 }
             }
@@ -1003,11 +1010,18 @@ public sealed partial class SolParser(SolParserOptions options)
 
         for (var i = 0; i < arguments.Count; i++)
         {
-            var pname = named ? native!.Parameters[i].Name : "arg" + (i + 1);
+            // A cast usually writes types alone, but an array parameter has to be written whole —
+            // `Float3 corners[8]` — and the declarator would otherwise be read as part of the type.
+            var declarator = ArrayParameterPattern().Match(arguments[i]);
+            var pname = named ? native!.Parameters[i].Name
+                : declarator.Success ? declarator.Groups["name"].Value
+                : "arg" + (i + 1);
             member.Parameters.Add(new LuaParameter
             {
                 Name = pname,
-                Type = context.Map(arguments[i]),
+                Type = declarator.Success
+                    ? context.Map(declarator.Groups["type"].Value) + "[]"
+                    : context.Map(arguments[i]),
                 Description = named ? native!.ParameterDocs.GetValueOrDefault(pname) : null,
             });
         }
@@ -1610,6 +1624,10 @@ public sealed partial class SolParser(SolParserOptions options)
     [GeneratedRegex(@"\bif\s+constexpr\s*\(")]
     private static partial Regex ConstexprPattern();
 
+    /// <summary>A C array parameter, declarator and all: <c>Float3 corners[8]</c>.</summary>
+    [GeneratedRegex(@"^(?<type>.+?)\s+(?<name>[A-Za-z_]\w*)\s*(?:\[[^\]]*\])+$")]
+    private static partial Regex ArrayParameterPattern();
+
     /// <summary>A type in a rendered signature: what follows the colon of `arg: T` or `(...): T`.</summary>
     [GeneratedRegex(@"(?<=:\s)[A-Za-z_]\w*(?:\[\])?\??")]
     private static partial Regex SignatureTypePattern();
@@ -1621,7 +1639,12 @@ public sealed partial class SolParser(SolParserOptions options)
     [GeneratedRegex(@"\{\s*return\s+(?<target>[A-Za-z_]\w*(?:::[A-Za-z_]\w*)+)\s*[({;]")]
     private static partial Regex ForwardedExpressionPattern();
 
-    [GeneratedRegex(@"^(?<type>.*?[\s&*])\s*(?<name>[A-Za-z_]\w*)\s*(?:=[^,]*)?$")]
+    /// <summary>
+    /// A parameter declaration. The array declarator is captured separately because it sits after
+    /// the name (<c>Float3 corners[8]</c>), which would otherwise leave the whole text looking
+    /// like a type.
+    /// </summary>
+    [GeneratedRegex(@"^(?<type>.*?[\s&*])\s*(?<name>[A-Za-z_]\w*)\s*(?<array>(?:\[[^\]]*\])+)?\s*(?:=[^,]*)?$")]
     private static partial Regex ParameterPattern();
 
     [GeneratedRegex(@"^static_cast\s*<\s*(?<type>[^>]+)>")]
