@@ -112,8 +112,12 @@ public sealed partial class SolParser(SolParserOptions options)
         {
             [options.RootVariable] = options.RootPath,
         };
-        var usertypes = new Dictionary<string, string>(StringComparer.Ordinal);
+        // A generic helper registers one usertype variable for several Lua types at once
+        // (RegisterVector2BaseImpl<float|double|int32> -> Float2, Double2, Int2), so the variable
+        // stands for all of them, each with the substitutions of its own instantiation.
+        var usertypes = new Dictionary<string, List<UsertypeBinding>>(StringComparer.Ordinal);
         var enums = new Dictionary<string, string>(StringComparer.Ordinal);
+        var conditionals = ConstexprBlocks(source);
 
         var events = new List<(int Index, Action Apply)>();
 
@@ -167,11 +171,18 @@ public sealed partial class SolParser(SolParserOptions options)
             {
                 if (!tables.TryGetValue(captured.Owner, out var ownerPath))
                     return;
+                if (captured.Variable is { Length: > 0 })
+                    usertypes.Remove(captured.Variable);
+
                 foreach (var (name, context) in captured.Names)
                 {
                     var path = ownerPath == string.Empty ? name : ownerPath + "." + name;
                     if (captured.Variable is { Length: > 0 })
-                        usertypes[captured.Variable] = path;
+                    {
+                        if (!usertypes.TryGetValue(captured.Variable, out var bound))
+                            usertypes[captured.Variable] = bound = [];
+                        bound.Add(new UsertypeBinding(path, context));
+                    }
 
                     var symbol = Declare(path, LuaSymbolKind.Class, relative, captured.Line, group);
                     // Record the unfolded type (Vector3Base<float>), not the local alias (VecT).
@@ -273,13 +284,13 @@ public sealed partial class SolParser(SolParserOptions options)
                     return;
 
                 var line = source.LineOf(captured.Index);
-                var target = ResolveTarget(variable, tables, usertypes, enums, relative, line, group);
-                if (target is null)
-                    return;
-
-                var member = BuildCallable(name, parts[1], source, line, relative,
-                    target.Kind == LuaSymbolKind.Class, ContextOf(target));
-                AddMember(target, member);
+                foreach (var (target, context) in ResolveTargets(variable, tables, usertypes, enums,
+                             relative, line, group, conditionals, captured.Index))
+                {
+                    var member = BuildCallable(name, parts[1], source, line, relative,
+                        target.Kind == LuaSymbolKind.Class, context);
+                    AddMember(target, member);
+                }
             }));
         }
 
@@ -299,12 +310,11 @@ public sealed partial class SolParser(SolParserOptions options)
                     return;
 
                 var line = source.LineOf(captured.Index);
-                var target = ResolveTarget(captured.Groups["var"].Value, tables, usertypes, enums,
-                    relative, line, group);
-                if (target is null)
-                    return;
-
-                AddMember(target, BuildValue(name, parts[1], source, line, relative, ContextOf(target)));
+                foreach (var (target, context) in ResolveTargets(captured.Groups["var"].Value, tables,
+                             usertypes, enums, relative, line, group, conditionals, captured.Index))
+                {
+                    AddMember(target, BuildValue(name, parts[1], source, line, relative, context));
+                }
             }));
         }
 
@@ -314,17 +324,16 @@ public sealed partial class SolParser(SolParserOptions options)
             events.Add((captured.Index, () =>
             {
                 var line = source.LineOf(captured.Index);
-                var target = ResolveTarget(captured.Groups["var"].Value, tables, usertypes, enums,
-                    relative, line, group);
-                if (target is null)
-                    return;
-
                 var semicolon = code.IndexOf(';', captured.Index);
                 var value = semicolon < 0
                     ? string.Empty
                     : code[(captured.Index + captured.Length)..semicolon].Trim();
-                AddMember(target, BuildValue(captured.Groups["name"].Value, value, source, line, relative,
-                    ContextOf(target)));
+                foreach (var (target, context) in ResolveTargets(captured.Groups["var"].Value, tables,
+                             usertypes, enums, relative, line, group, conditionals, captured.Index))
+                {
+                    AddMember(target, BuildValue(captured.Groups["name"].Value, value, source, line,
+                        relative, context));
+                }
             }));
         }
 
@@ -342,24 +351,75 @@ public sealed partial class SolParser(SolParserOptions options)
             ? TypeContext.None
             : new TypeContext { SelfNative = symbol.NativeType, SelfLua = symbol.Name };
 
-    private LuaSymbol? ResolveTarget(string variable,
+    /// <summary>
+    /// Every symbol a registration through <paramref name="variable"/> lands on, with the type
+    /// context to read it in. That is one symbol except for a usertype variable inside a generic
+    /// helper, where the same statement registers the member on each instantiation.
+    /// </summary>
+    private IEnumerable<(LuaSymbol Symbol, TypeContext Context)> ResolveTargets(string variable,
         Dictionary<string, string> tables,
-        Dictionary<string, string> usertypes,
+        Dictionary<string, List<UsertypeBinding>> usertypes,
         Dictionary<string, string> enums,
         string file,
         int line,
-        string group)
+        string group,
+        IReadOnlyList<ConstexprBlock> conditionals,
+        int index)
     {
-        if (usertypes.TryGetValue(variable, out var usertypePath))
-            return _symbols.GetValueOrDefault(usertypePath);
+        if (usertypes.TryGetValue(variable, out var bound))
+        {
+            // `if constexpr (std::is_floating_point<T>::value)` registers a member on some
+            // instantiations and not others; T is known per instantiation, so the branch is
+            // decided here rather than handed to every one of them.
+            var enclosing = conditionals.Where(b => b.Start < index && index < b.End).ToList();
+            foreach (var (path, context) in bound)
+            {
+                if (enclosing.Any(b => context.Evaluate(b.Condition) == false))
+                    continue;
+                if (_symbols.GetValueOrDefault(path) is { } symbol)
+                    yield return (symbol, context);
+            }
+            yield break;
+        }
+
         if (enums.TryGetValue(variable, out var enumPath))
-            return _symbols.GetValueOrDefault(enumPath);
+        {
+            if (_symbols.GetValueOrDefault(enumPath) is { } symbol)
+                yield return (symbol, ContextOf(symbol));
+            yield break;
+        }
+
         if (tables.TryGetValue(variable, out var tablePath))
+        {
             // A registrar that receives its table as a parameter can be read before the file that
             // creates the table, so the symbol is opened here; the declaration corrects its
             // location and kind whenever it is reached.
-            return Ensure(tablePath, LuaSymbolKind.Module, file, line, group);
-        return null;
+            var symbol = Ensure(tablePath, LuaSymbolKind.Module, file, line, group);
+            yield return (symbol, ContextOf(symbol));
+        }
+    }
+
+    private sealed record UsertypeBinding(string Path, TypeContext Context);
+
+    /// <summary>An <c>if constexpr (...) { ... }</c> body, and the condition guarding it.</summary>
+    private sealed record ConstexprBlock(int Start, int End, string Condition);
+
+    private static IReadOnlyList<ConstexprBlock> ConstexprBlocks(SourceText source)
+    {
+        var blocks = new List<ConstexprBlock>();
+        foreach (Match m in ConstexprPattern().Matches(source.Code))
+        {
+            var open = source.Code.IndexOf('(', m.Index);
+            if (open < 0)
+                continue;
+            var condition = ReadBalanced(source.Code, open, '(', ')');
+            var brace = source.Code.IndexOf('{', open + condition.Length);
+            if (brace < 0)
+                continue;
+            var body = ReadBalanced(source.Code, brace, '{', '}');
+            blocks.Add(new ConstexprBlock(brace, brace + body.Length + 1, condition.Trim()));
+        }
+        return blocks;
     }
 
     // ---- Usertypes ---------------------------------------------------------
@@ -397,6 +457,44 @@ public sealed partial class SolParser(SolParserOptions options)
                     break;
             }
             return text;
+        }
+
+        /// <summary>
+        /// Whether a compile-time condition holds for this instantiation, or null when the
+        /// condition is not one this understands — an unrecognised guard must not silently drop
+        /// members, so the caller keeps them.
+        /// </summary>
+        public bool? Evaluate(string condition)
+        {
+            var text = Expand(condition).Trim();
+            var negated = false;
+            while (text.StartsWith('!'))
+            {
+                negated = !negated;
+                text = text[1..].Trim();
+            }
+
+            var trait = Regex.Match(text,
+                @"^(?:std::)?is_(?<trait>floating_point|integral|signed|unsigned)(?:_v\s*<\s*(?<arg>[^>]+)\s*>|\s*<\s*(?<arg2>[^>]+)\s*>\s*::\s*value)$");
+            if (!trait.Success)
+                return null;
+
+            var argument = (trait.Groups["arg"].Success ? trait.Groups["arg"] : trait.Groups["arg2"]).Value.Trim();
+            var floating = argument is "float" or "double" or "long double" or "Real" or "Half";
+            var integral = argument is "int8" or "int16" or "int32" or "int64" or "uint8" or "uint16"
+                or "uint32" or "uint64" or "int" or "long" or "short" or "char" or "byte" or "bool";
+            if (!floating && !integral)
+                return null;
+
+            var result = trait.Groups["trait"].Value switch
+            {
+                "floating_point" => floating,
+                "integral" => integral,
+                "signed" => floating || !argument.StartsWith('u'),
+                "unsigned" => integral && argument.StartsWith('u'),
+                _ => (bool?)null,
+            };
+            return result is null ? null : result != negated;
         }
 
         public string Map(string? type)
@@ -931,6 +1029,7 @@ public sealed partial class SolParser(SolParserOptions options)
         var trimmed = value.Trim();
         if (LambdaPattern().IsMatch(trimmed)
             || MemberPointerPattern().IsMatch(trimmed)
+            || IsCastToFunction(trimmed)
             || trimmed.StartsWith("sol::overload", StringComparison.Ordinal))
         {
             return BuildCallable(name, trimmed, source, line, relative, false, context);
@@ -949,6 +1048,19 @@ public sealed partial class SolParser(SolParserOptions options)
             SourceFile = relative,
             SourceLine = line,
         }, doc);
+    }
+
+    /// <summary>
+    /// A cast that selects an overload — <c>static_cast&lt;void (VecT::*)()&gt;(&amp;VecT::Normalize)</c>.
+    /// It reads as a value assignment but registers a function, and the cast names the signature.
+    /// </summary>
+    private static bool IsCastToFunction(string expression)
+    {
+        var cast = OverloadCastPattern().Match(expression);
+        if (!cast.Success)
+            return false;
+        var signature = cast.Groups["sig"].Value.Trim();
+        return FunctionPointerPattern().IsMatch(signature) || FunctionTypePattern().IsMatch(signature);
     }
 
     private static string InferLiteralType(string value)
@@ -1440,6 +1552,9 @@ public sealed partial class SolParser(SolParserOptions options)
 
     [GeneratedRegex(@"^\s*\[[^\]]*\]\s*\(")]
     private static partial Regex LambdaPattern();
+
+    [GeneratedRegex(@"\bif\s+constexpr\s*\(")]
+    private static partial Regex ConstexprPattern();
 
     [GeneratedRegex(@"->\s*(?<type>[\w:<>,\s\*&]+?)\s*\{")]
     private static partial Regex TrailingReturnPattern();
