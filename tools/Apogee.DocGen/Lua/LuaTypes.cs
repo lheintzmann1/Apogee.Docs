@@ -76,6 +76,16 @@ public static class LuaTypes
         if (Direct.TryGetValue(text, out var mapped))
             return mapped;
 
+        // The multi-word built-ins, which an alias chain can end at: Half is uint16 is
+        // `unsigned short`. Spelling out every combination is not worth it — a type written only
+        // from these keywords is an integer, and the floating-point ones are named above.
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length > 1
+            && words.All(w => w is "unsigned" or "signed" or "int" or "char" or "short" or "long"))
+        {
+            return "integer";
+        }
+
         // Drop any remaining template arguments: Vector3Base<float> is exposed as Float3 anyway,
         // and a raw template name is more useful than a mangled one.
         var angle = text.IndexOf('<');

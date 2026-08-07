@@ -72,7 +72,7 @@ public sealed partial class SolParser(SolParserOptions options)
             }
         }
 
-        RenamePublishedEnums();
+        RenameNativeTypes();
 
         foreach (var symbol in _symbols.Values)
         {
@@ -1294,32 +1294,53 @@ public sealed partial class SolParser(SolParserOptions options)
     }
 
     /// <summary>
-    /// Retypes every signature written from a C++ enum that is published under another name —
-    /// <c>InputGamepadIndex</c> is <c>Apogee.Gamepad</c> in Lua, and naming the C++ enum in a Lua
-    /// signature points the reader at a type that does not exist.
+    /// Retypes every signature that still names a C++ type instead of the Lua one.
+    ///
+    /// Signatures are read from the C++ declaration, which is the right name only when the two
+    /// agree. Two things break that: an enum published under a different name
+    /// (<c>InputGamepadIndex</c> is <c>Apogee.Gamepad</c>), and the engine's aliases, which are
+    /// most of its public vocabulary (<c>Vector3</c> is <c>Vector3Base&lt;Real&gt;</c>, bound as
+    /// <c>Float3</c>; <c>Real</c> is a number). Either way the reader is pointed at a type that
+    /// does not exist in Lua, and DocFX has nothing to link.
     /// </summary>
-    private void RenamePublishedEnums()
+    private void RenameNativeTypes()
     {
-        // A native name that is itself a bound Lua type is that type, not an alias for another.
-        foreach (var path in _symbols.Values.Select(s => s.Name).ToList())
-            _publishedEnums.Remove(path);
+        var bound = _symbols.Values.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
 
-        if (_publishedEnums.Count == 0)
-            return;
+        // A native name that is itself a bound Lua type is that type, not an alias for another.
+        foreach (var name in bound)
+            _publishedEnums.Remove(name);
+
+        // The C++ type behind each usertype, which is what an alias resolves to.
+        var usertypes = _symbols.Values
+            .Where(s => s.Kind == LuaSymbolKind.Class && s.NativeType is not null)
+            .GroupBy(s => Compact(s.NativeType!), StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Name, StringComparer.Ordinal);
+
+        var renamed = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var member in _symbols.Values.SelectMany(s => s.Members))
         {
             foreach (var parameter in member.Parameters)
-                parameter.Type = RenamePublishedEnum(parameter.Type);
+                parameter.Type = RenameNativeType(parameter.Type, bound, usertypes, renamed);
             for (var i = 0; i < member.Returns.Count; i++)
-                member.Returns[i] = RenamePublishedEnum(member.Returns[i]);
+                member.Returns[i] = RenameNativeType(member.Returns[i], bound, usertypes, renamed);
             if (member.ValueType is not null)
-                member.ValueType = RenamePublishedEnum(member.ValueType);
+                member.ValueType = RenameNativeType(member.ValueType, bound, usertypes, renamed);
+
+            // An overload set renders its alternatives as text, so those carry type names too.
+            for (var i = 0; i < member.AdditionalSignatures.Count; i++)
+            {
+                member.AdditionalSignatures[i] = SignatureTypePattern().Replace(
+                    member.AdditionalSignatures[i],
+                    match => RenameNativeType(match.Value, bound, usertypes, renamed));
+            }
         }
     }
 
     /// <summary>Swaps the name while keeping the <c>?</c> and <c>[]</c> the signature carries.</summary>
-    private string RenamePublishedEnum(string type)
+    private string RenameNativeType(string type, HashSet<string> bound,
+        Dictionary<string, string> usertypes, Dictionary<string, string> renamed)
     {
         var bare = type.TrimEnd('?');
         var suffix = type[bare.Length..];
@@ -1328,7 +1349,40 @@ public sealed partial class SolParser(SolParserOptions options)
             bare = bare[..^2];
             suffix = "[]" + suffix;
         }
-        return _publishedEnums.TryGetValue(bare, out var published) ? published + suffix : type;
+
+        if (!renamed.TryGetValue(bare, out var lua))
+            renamed[bare] = lua = ResolveLuaName(bare, bound, usertypes);
+        return lua + suffix;
+    }
+
+    private string ResolveLuaName(string type, HashSet<string> bound, Dictionary<string, string> usertypes)
+    {
+        if (bound.Contains(type))
+            return type;
+        if (_publishedEnums.TryGetValue(type, out var published))
+            return published;
+
+        // Follow the engine's typedefs to what they finally name, then back to the Lua type bound
+        // for it — Vector3 -> Vector3Base<float> -> Float3 — or to a primitive, for the scalar
+        // aliases (Real -> float -> number, Half -> uint16 -> integer).
+        var resolved = Compact(options.Native.ResolveAliases(type));
+        if (resolved == Compact(type))
+            return type;
+        if (usertypes.TryGetValue(resolved, out var luaName))
+            return luaName;
+
+        var mapped = LuaTypes.Map(resolved);
+        return mapped == resolved ? type : mapped;
+    }
+
+    /// <summary>
+    /// One spelling for a C++ type, so two of them can be compared: no space around the
+    /// punctuation, exactly one between words (<c>unsigned short</c> is two words, not one).
+    /// </summary>
+    private static string Compact(string type)
+    {
+        var text = Regex.Replace(type.Trim(), @"\s+", " ");
+        return Regex.Replace(text, @"\s*([<>,*&])\s*", "$1");
     }
 
     private static string Join(string owner, string name) =>
@@ -1555,6 +1609,10 @@ public sealed partial class SolParser(SolParserOptions options)
 
     [GeneratedRegex(@"\bif\s+constexpr\s*\(")]
     private static partial Regex ConstexprPattern();
+
+    /// <summary>A type in a rendered signature: what follows the colon of `arg: T` or `(...): T`.</summary>
+    [GeneratedRegex(@"(?<=:\s)[A-Za-z_]\w*(?:\[\])?\??")]
+    private static partial Regex SignatureTypePattern();
 
     [GeneratedRegex(@"->\s*(?<type>[\w:<>,\s\*&]+?)\s*\{")]
     private static partial Regex TrailingReturnPattern();

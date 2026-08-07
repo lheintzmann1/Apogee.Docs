@@ -26,6 +26,7 @@ public sealed class NativeMember
 public sealed class NativeIndex
 {
     private readonly Dictionary<string, NativeMember> _members = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _typedefs = new(StringComparer.Ordinal);
 
     public static NativeIndex Empty { get; } = new();
 
@@ -39,6 +40,11 @@ public sealed class NativeIndex
         foreach (var compound in XDocument.Load(indexPath).Root!.Elements("compound"))
         {
             var kind = (string?)compound.Attribute("kind");
+            if (kind == "file")
+            {
+                index.LoadTypedefs(xmlDirectory, (string?)compound.Attribute("refid"));
+                continue;
+            }
             if (kind is not ("class" or "struct" or "namespace" or "union" or "interface"))
                 continue;
             var refId = (string?)compound.Attribute("refid");
@@ -92,6 +98,68 @@ public sealed class NativeIndex
 
         return index;
     }
+
+    /// <summary>
+    /// File-scope typedefs. The engine's public vocabulary is largely aliases — <c>Vector3</c> is
+    /// <c>Vector3Base&lt;Real&gt;</c> and <c>Real</c> is <c>float</c> unless the build asked for
+    /// large worlds — and a binding declared in terms of one has to be resolved through it before
+    /// the Lua type behind it can be recognised.
+    /// </summary>
+    private void LoadTypedefs(string xmlDirectory, string? refId)
+    {
+        if (refId is null)
+            return;
+        var file = Path.Combine(xmlDirectory, refId + ".xml");
+        if (!File.Exists(file))
+            return;
+
+        var definition = XDocument.Load(file).Root!.Element("compounddef");
+        if (definition is null)
+            return;
+
+        foreach (var member in definition.Descendants("memberdef"))
+        {
+            if ((string?)member.Attribute("kind") != "typedef")
+                continue;
+            var name = member.Element("name")?.Value.Trim();
+            var type = member.Element("type");
+            if (string.IsNullOrEmpty(name) || type is null)
+                continue;
+            // The target is mixed content: `Vector3Base< Real >` is text around a <ref> element.
+            _typedefs.TryAdd(name, Clean(string.Concat(type.Nodes().Select(NodeText))));
+        }
+    }
+
+    private static string NodeText(XNode node) =>
+        node is XElement element ? element.Value : node is XText text ? text.Value : string.Empty;
+
+    /// <summary>
+    /// Follows a chain of typedefs to what it finally names, leaving anything that is not one
+    /// untouched: <c>Vector3</c> -> <c>Vector3Base&lt;float&gt;</c>, <c>Real</c> -> <c>float</c>.
+    /// </summary>
+    public string ResolveAliases(string type)
+    {
+        if (_typedefs.Count == 0)
+            return type;
+
+        var text = type;
+        // Aliases nest one level deep here (Vector3 -> Vector3Base<Real> -> Vector3Base<float>);
+        // the bound is what stops a typedef that names itself from looping.
+        for (var pass = 0; pass < 4; pass++)
+        {
+            var before = text;
+            text = TypeTokenPattern.Replace(text, match =>
+                _typedefs.TryGetValue(match.Value, out var target) && target != match.Value
+                    ? target
+                    : match.Value);
+            if (text == before)
+                break;
+        }
+        return System.Text.RegularExpressions.Regex.Replace(text, @"\s*([<>])\s*", "$1").Trim();
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex TypeTokenPattern =
+        new(@"\b[A-Za-z_]\w*\b", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     public NativeMember? Lookup(string type, string name) =>
         _members.GetValueOrDefault($"{type}::{name}");
