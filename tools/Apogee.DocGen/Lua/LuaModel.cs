@@ -64,7 +64,7 @@ public sealed class LuaSymbol
     /// <summary>Dotted Lua path, e.g. <c>Apogee.Time</c> or <c>Apogee.Float3</c>.</summary>
     public required string Path { get; init; }
 
-    public required LuaSymbolKind Kind { get; init; }
+    public required LuaSymbolKind Kind { get; set; }
     public string? Description { get; set; }
     public string? Remarks { get; set; }
     public string? Example { get; set; }

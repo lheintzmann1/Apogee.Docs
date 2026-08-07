@@ -30,19 +30,38 @@ public sealed partial class SolParser(SolParserOptions options)
     private readonly Dictionary<string, LuaSymbol> _symbols = new(StringComparer.Ordinal);
     private readonly List<string> _warnings = [];
 
+    private RegistrarIndex _registrars = RegistrarIndex.Empty;
+
     public IReadOnlyList<string> Warnings => _warnings;
 
     public IReadOnlyList<LuaSymbol> Parse(IEnumerable<string> files)
     {
+        var sources = new List<SourceText>();
         foreach (var file in files.OrderBy(f => f, StringComparer.Ordinal))
         {
             try
             {
-                ParseFile(SourceText.Load(file));
+                sources.Add(SourceText.Load(file));
             }
             catch (Exception ex)
             {
                 _warnings.Add($"{file}: {ex.Message}");
+            }
+        }
+
+        // Which table each registrar is handed, resolved across files before any of them is read:
+        // a file that receives its table as a parameter cannot be understood on its own.
+        _registrars = RegistrarIndex.Build(sources, options, _warnings);
+
+        foreach (var source in sources)
+        {
+            try
+            {
+                ParseFile(source);
+            }
+            catch (Exception ex)
+            {
+                _warnings.Add($"{source.Path}: {ex.Message}");
             }
         }
 
@@ -78,7 +97,8 @@ public sealed partial class SolParser(SolParserOptions options)
         var relative = Relative(source.Path);
 
         // Variable name -> Lua path. Every binding function receives the root table under the
-        // same parameter name, which is what makes a purely local scan sufficient.
+        // same parameter name, so that one is bound for the whole file; any further table a
+        // registrar receives is bound to its parameter as the scan enters that function.
         var tables = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [options.RootVariable] = options.RootPath,
@@ -87,6 +107,25 @@ public sealed partial class SolParser(SolParserOptions options)
         var enums = new Dictionary<string, string>(StringComparer.Ordinal);
 
         var events = new List<(int Index, Action Apply)>();
+
+        // Parameters holding a table created in another file (`sol::table& actor` <- Apogee.Actor).
+        var parameters = new List<string>();
+        foreach (var definition in RegistrarIndex.Definitions(source))
+        {
+            var captured = definition;
+            events.Add((captured.Index, () =>
+            {
+                foreach (var name in parameters)
+                    tables.Remove(name);
+                parameters.Clear();
+
+                foreach (var (parameter, path) in _registrars.Bindings(captured, options.RootVariable))
+                {
+                    tables[parameter] = path;
+                    parameters.Add(parameter);
+                }
+            }));
+        }
 
         // create_named / create_named_table: a nested table, possibly assigned to a local.
         foreach (Match m in TableDeclPattern().Matches(code))
@@ -107,7 +146,7 @@ public sealed partial class SolParser(SolParserOptions options)
                     tables[variable] = path;
 
                 var line = source.LineOf(captured.Index);
-                var symbol = Ensure(path, LuaSymbolKind.Module, relative, line, group);
+                var symbol = Declare(path, LuaSymbolKind.Module, relative, line, group);
                 ApplyBanner(symbol, source, line);
             }));
         }
@@ -125,7 +164,7 @@ public sealed partial class SolParser(SolParserOptions options)
                     if (captured.Variable is { Length: > 0 })
                         usertypes[captured.Variable] = path;
 
-                    var symbol = Ensure(path, LuaSymbolKind.Class, relative, captured.Line, group);
+                    var symbol = Declare(path, LuaSymbolKind.Class, relative, captured.Line, group);
                     // Record the unfolded type (Vector3Base<float>), not the local alias (VecT).
                     symbol.NativeType = context.Expand(captured.NativeType);
                     ApplyBanner(symbol, source, captured.Line);
@@ -153,7 +192,7 @@ public sealed partial class SolParser(SolParserOptions options)
                     return;
 
                 var line = source.LineOf(captured.Index);
-                var symbol = Ensure(Join(ownerPath, name), LuaSymbolKind.Enum, relative, line, group);
+                var symbol = Declare(Join(ownerPath, name), LuaSymbolKind.Enum, relative, line, group);
                 ApplyBanner(symbol, source, line);
 
                 for (var i = 1; i + 1 < parts.Count; i += 2)
@@ -185,7 +224,7 @@ public sealed partial class SolParser(SolParserOptions options)
                     return;
                 var name = captured.Groups["name"].Value;
                 var line = source.LineOf(captured.Index);
-                var symbol = Ensure(Join(ownerPath, name), LuaSymbolKind.Enum, relative, line, group);
+                var symbol = Declare(Join(ownerPath, name), LuaSymbolKind.Enum, relative, line, group);
                 ApplyBanner(symbol, source, line);
 
                 foreach (var (key, value, valueLine) in ReadPairArray(source, captured.Groups["array"].Value))
@@ -222,7 +261,7 @@ public sealed partial class SolParser(SolParserOptions options)
                     return;
 
                 var line = source.LineOf(captured.Index);
-                var target = ResolveTarget(variable, tables, usertypes, enums);
+                var target = ResolveTarget(variable, tables, usertypes, enums, relative, line, group);
                 if (target is null)
                     return;
 
@@ -247,11 +286,12 @@ public sealed partial class SolParser(SolParserOptions options)
                 if (name is null)
                     return;
 
-                var target = ResolveTarget(captured.Groups["var"].Value, tables, usertypes, enums);
+                var line = source.LineOf(captured.Index);
+                var target = ResolveTarget(captured.Groups["var"].Value, tables, usertypes, enums,
+                    relative, line, group);
                 if (target is null)
                     return;
 
-                var line = source.LineOf(captured.Index);
                 AddMember(target, BuildValue(name, parts[1], source, line, relative, ContextOf(target)));
             }));
         }
@@ -261,7 +301,9 @@ public sealed partial class SolParser(SolParserOptions options)
             var captured = m;
             events.Add((captured.Index, () =>
             {
-                var target = ResolveTarget(captured.Groups["var"].Value, tables, usertypes, enums);
+                var line = source.LineOf(captured.Index);
+                var target = ResolveTarget(captured.Groups["var"].Value, tables, usertypes, enums,
+                    relative, line, group);
                 if (target is null)
                     return;
 
@@ -269,7 +311,6 @@ public sealed partial class SolParser(SolParserOptions options)
                 var value = semicolon < 0
                     ? string.Empty
                     : code[(captured.Index + captured.Length)..semicolon].Trim();
-                var line = source.LineOf(captured.Index);
                 AddMember(target, BuildValue(captured.Groups["name"].Value, value, source, line, relative,
                     ContextOf(target)));
             }));
@@ -292,14 +333,20 @@ public sealed partial class SolParser(SolParserOptions options)
     private LuaSymbol? ResolveTarget(string variable,
         Dictionary<string, string> tables,
         Dictionary<string, string> usertypes,
-        Dictionary<string, string> enums)
+        Dictionary<string, string> enums,
+        string file,
+        int line,
+        string group)
     {
         if (usertypes.TryGetValue(variable, out var usertypePath))
             return _symbols.GetValueOrDefault(usertypePath);
         if (enums.TryGetValue(variable, out var enumPath))
             return _symbols.GetValueOrDefault(enumPath);
         if (tables.TryGetValue(variable, out var tablePath))
-            return _symbols.GetValueOrDefault(tablePath);
+            // A registrar that receives its table as a parameter can be read before the file that
+            // creates the table, so the symbol is opened here; the declaration corrects its
+            // location and kind whenever it is reached.
+            return Ensure(tablePath, LuaSymbolKind.Module, file, line, group);
         return null;
     }
 
@@ -1064,6 +1111,23 @@ public sealed partial class SolParser(SolParserOptions options)
         return symbol;
     }
 
+    /// <summary>
+    /// The symbol for a table, usertype or enum at the point it is created.
+    ///
+    /// Members registered in another file open the symbol before this runs — a registrar receives
+    /// the table as a parameter and the files are read in name order — so the declaration also
+    /// restates what only it knows: the kind, and the location the page should point at.
+    /// </summary>
+    private LuaSymbol Declare(string path, LuaSymbolKind kind, string file, int line, string group)
+    {
+        var symbol = Ensure(path, kind, file, line, group);
+        symbol.Kind = kind;
+        symbol.SourceFile = file;
+        symbol.SourceLine = line;
+        symbol.Group = group;
+        return symbol;
+    }
+
     private static void AddMember(LuaSymbol symbol, LuaMember member)
     {
         var existing = symbol.Members.FindIndex(m => m.Name == member.Name && m.Kind == member.Kind);
@@ -1254,7 +1318,7 @@ public sealed partial class SolParser(SolParserOptions options)
     // ---- Patterns ----------------------------------------------------------
 
     [GeneratedRegex(@"(?:(?:sol::table|auto)\s+(?<var>\w+)\s*=\s*)?\b(?<owner>\w+)\s*\.\s*create_named(?:_table)?\s*\(\s*""(?<name>[^""]+)""")]
-    private static partial Regex TableDeclPattern();
+    internal static partial Regex TableDeclPattern();
 
     [GeneratedRegex(@"(?:(?:auto|sol::usertype\s*<[^>]*>)\s+(?<var>\w+)\s*=\s*)?\b(?<owner>\w+)\s*\.\s*new_usertype\s*<")]
     private static partial Regex UsertypePattern();

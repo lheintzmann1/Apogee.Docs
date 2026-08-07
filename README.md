@@ -114,6 +114,14 @@ API does not exist in Lua at all. It is defined by roughly 260 `set_function` ca
 usertypes, fields, constructors, metamethods, enums — is therefore exhaustive by construction: a
 binding cannot be added without appearing in the docs, and one that is deleted cannot linger.
 
+A domain's table is created once and then handed to a row of registrars that live in their own
+files, one per concern, where it arrives as a plain `sol::table&` parameter. Those call sites are
+resolved before any file is read — `Actors::RegisterLifecycle(lua, apogee, actor)` says that the
+third argument of a three-argument `RegisterLifecycle` is `Apogee.Actor` — so a file that cannot
+be understood on its own still files its members under the right table. Registrars are matched by
+name and argument count; one reached with conflicting tables is reported and left unattributed
+rather than guessed at.
+
 What the calls alone cannot state is filled in, in order of precedence:
 
 1. **The C++ declaration.** A binding that forwards to a native member (`&Actor::SetName`,
