@@ -4,13 +4,12 @@ using System.Text;
 using System.Text.RegularExpressions;
 
 /// <summary>
-/// A comment block above a binding, split into prose and tags.
+/// A documentation comment above a binding, split into prose and tags.
 ///
-/// Two styles are accepted so that documenting a binding never requires reformatting the file:
-/// plain prose (already present throughout the binding sources, and used as-is), and explicit
-/// tags for anything the parser cannot infer — parameter types, return types, examples. Tags may
-/// be written as <c>@param</c> or in LuaCATS form (<c>---@param</c>), since the latter is what
-/// authors already know from Lua tooling.
+/// The lines arrive already filtered to <c>///</c> and <c>/** */</c> by <see cref="SourceText"/>.
+/// Within them, prose is the description and tags carry what the parser cannot infer — parameter
+/// types, return types, examples. Tags may be written as <c>@param</c> or in LuaCATS form
+/// (<c>---@param</c>), since the latter is what authors already know from Lua tooling.
 /// </summary>
 public sealed class DocComment
 {
@@ -30,7 +29,7 @@ public sealed class DocComment
     private static readonly Regex TagPattern = new(@"^\s*(?:-{1,3})?@(?<tag>\w+)\b\s*(?<rest>.*)$", RegexOptions.Compiled);
 
     private static readonly Regex BannerPattern =
-        new(@"^\s*(?:-{3,}|={3,})\s*[\w.:]*\s*(?:-{3,}|={3,})?\s*$", RegexOptions.Compiled);
+        new(@"^\s*(?:-{3,}|={3,})(?:[^\n]*?(?:-{3,}|={3,}))?\s*$", RegexOptions.Compiled);
 
     public static DocComment Parse(IReadOnlyList<string> lines)
     {
@@ -41,12 +40,12 @@ public sealed class DocComment
 
         foreach (var raw in lines)
         {
-            // Leading '/' survives from '///' comments.
-            var line = raw.TrimStart('/').TrimEnd();
+            var line = raw.TrimEnd();
 
-            // Section banners ("---- Apogee.Time ----", "==========") are visual rules in the
-            // source, not prose. The label in the middle is the table name, which the reader of
-            // the generated page already has in the heading.
+            // Section banners ("---- Apogee.Time ----", "---- Global parameters ----",
+            // "==========") are visual rules in the source, not prose. The label in the middle
+            // names the section, which the reader of the generated page already has in the
+            // heading above whatever the banner introduces.
             if (BannerPattern.IsMatch(line))
                 continue;
 
@@ -155,21 +154,8 @@ public sealed class DocComment
         if (example.Length > 0)
             doc.Example = "```lua\n" + example.ToString().Trim('\n') + "\n```";
 
-        // A lone "// Fields" or "// Methods" above a registration groups the source, it does not
-        // describe the member underneath. Descriptions are sentences; bare labels are not.
-        if (doc.Remarks is null && doc.Summary is not null && IsSectionLabel(doc.Summary))
-            doc.Summary = null;
-
         return doc;
     }
-
-    private static bool IsSectionLabel(string text) =>
-        !text.Contains('\n')
-        && text.Length <= 32
-        && !text.EndsWith('.')
-        && !text.EndsWith(':')
-        && text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 3
-        && char.IsUpper(text[0]);
 
     /// <summary>Splits into at most <paramref name="count"/> leading words plus the remainder.</summary>
     private static List<string> SplitWords(string text, int count)

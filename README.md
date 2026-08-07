@@ -128,8 +128,10 @@ What the calls alone cannot state is filled in, in order of precedence:
    `static_cast<...>(&VecT::Cross)`, or a lambda that is a single `return Time::GetDeltaTime();`)
    is resolved against the same Doxygen XML the C++ reference uses, and inherits that member's
    signature, parameter names and `<summary>`. Document the header, and the Lua page follows.
-2. **The comment above the registration.** Prose becomes the description; section banners
-   (`---- Apogee.Time ----`) become the module description.
+2. **The documentation comment above the registration.** Prose in a `///` or `/** */` comment
+   becomes the description; the banner rule of a section comment
+   (`/// ---- Apogee.Time ----`) is dropped, and the prose under it describes the table. A plain
+   `//` comment is a note to whoever maintains the binding and is never published.
 3. **Explicit tags** — `@param`, `@return`, `@field`, `@example`, `@deprecated` — for anything
    still unknown, chiefly the arguments of non-forwarding lambdas.
 

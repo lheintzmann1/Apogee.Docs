@@ -6,6 +6,10 @@ using System.Text;
 /// A C++ source file prepared for scanning: comments blanked out of the code (so a registration
 /// call can never be matched inside a comment) while the comment text itself is kept, indexed by
 /// line, so a declaration can pick up the prose written above it.
+///
+/// Only documentation comments — <c>///</c> and <c>/** */</c> — are kept. A plain <c>//</c> above
+/// a registration is a note to whoever maintains the binding, and reading it as the entry's
+/// description publishes half the reasoning in the file to people scripting a game.
 /// </summary>
 public sealed class SourceText
 {
@@ -14,12 +18,18 @@ public sealed class SourceText
 
     private readonly List<int> _lineStarts = [];
     private readonly Dictionary<int, string> _commentByLine = new();
+    private readonly HashSet<int> _noteLines = [];
 
     public static SourceText Load(string path)
     {
         var raw = File.ReadAllText(path).Replace("\r\n", "\n");
         var code = new StringBuilder(raw.Length);
         var comments = new Dictionary<int, string>();
+
+        // Lines carrying a plain comment. Not documentation, but not a break in the block either:
+        // a note written between a doc comment and the registration it describes is common enough
+        // that it should not cost the entry its description.
+        var notes = new HashSet<int>();
 
         var line = 1;
         var i = 0;
@@ -74,8 +84,12 @@ public sealed class SourceText
                 var end = raw.IndexOf('\n', i);
                 if (end < 0)
                     end = raw.Length;
-                if (!lineHasCode)
-                    comments[line] = raw[(i + 2)..end];
+                // "///", but not the "////////" of a rule.
+                var isDocumentation = i + 2 < end && raw[i + 2] == '/' && (i + 3 >= end || raw[i + 3] != '/');
+                if (!lineHasCode && isDocumentation)
+                    comments[line] = raw[(i + 3)..end];
+                else if (!lineHasCode)
+                    notes.Add(line);
                 code.Append(' ', end - i);
                 i = end;
                 continue;
@@ -87,11 +101,18 @@ public sealed class SourceText
                 if (end < 0)
                     end = raw.Length - 2;
                 var block = raw[(i + 2)..end];
+                // "/** ... */", the block form of "///".
+                var isDocumentation = block.StartsWith('*') && block != "*";
                 var blockLine = line;
                 foreach (var commentLine in block.Split('\n'))
                 {
                     if (blockLine != line || !lineHasCode)
-                        comments[blockLine] = commentLine.TrimStart(' ', '\t', '*');
+                    {
+                        if (isDocumentation)
+                            comments[blockLine] = commentLine.TrimStart(' ', '\t', '*');
+                        else
+                            notes.Add(blockLine);
+                    }
                     blockLine++;
                 }
                 foreach (var ch in raw[i..Math.Min(end + 2, raw.Length)])
@@ -119,6 +140,7 @@ public sealed class SourceText
         var source = new SourceText { Path = path, Code = code.ToString() };
         foreach (var (key, value) in comments)
             source._commentByLine[key] = value;
+        source._noteLines.UnionWith(notes);
 
         source._lineStarts.Add(0);
         for (var k = 0; k < source.Code.Length; k++)
@@ -146,14 +168,16 @@ public sealed class SourceText
     }
 
     /// <summary>
-    /// The contiguous comment block immediately above <paramref name="line"/>, in source order.
-    /// A blank line ends the block, so unrelated prose further up is not absorbed.
+    /// The documentation in the contiguous comment block immediately above <paramref name="line"/>,
+    /// in source order. A blank line ends the block, so unrelated prose further up is not absorbed.
     /// </summary>
     public IReadOnlyList<string> CommentAbove(int line)
     {
         var collected = new List<string>();
         for (var probe = line - 1; probe >= 1; probe--)
         {
+            if (_noteLines.Contains(probe))
+                continue;
             if (!_commentByLine.TryGetValue(probe, out var text))
                 break;
             collected.Add(text);
@@ -168,6 +192,8 @@ public sealed class SourceText
         var collected = new List<string>();
         for (var probe = line; probe < line + maxLines; probe++)
         {
+            if (_noteLines.Contains(probe))
+                continue;
             if (!_commentByLine.TryGetValue(probe, out var text))
                 break;
             collected.Add(text);

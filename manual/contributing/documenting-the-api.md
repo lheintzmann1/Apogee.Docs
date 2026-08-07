@@ -67,12 +67,13 @@ current. The generator fills in the rest from two further sources, in this order
    This is the best case, and it needs nothing written in the binding file at all. Document the
    header, and the Lua page follows.
 
-2. **The comment above the registration.** Plain prose becomes the description. Lambdas hide their
-   signature behind a C++ closure, so anything the parser cannot see goes in tags:
+2. **The documentation comment above the registration.** Prose in a `///` (or `/** */`) comment
+   becomes the description. Lambdas hide their signature behind a C++ closure, so anything the
+   parser cannot see goes in tags:
 
    ```cpp
-   // Pins the reported delta time to a constant, regardless of how long the frame
-   // actually took — used for deterministic replays and capture.
+   /// Pins the reported delta time to a constant, regardless of how long the frame
+   /// actually took — used for deterministic replays and capture.
    /// @param enable boolean  Whether to override the frame delta.
    /// @param value number    The delta to report, in seconds.
    /// @return nil
@@ -82,10 +83,26 @@ current. The generator fills in the rest from two further sources, in this order
    });
    ```
 
+   A plain `//` comment is **not** documentation. Registration code is dense with notes about sol2
+   overload resolution, pointer lifetime and why a binding is shaped the way it is; those are for
+   whoever maintains the binding, and they read as nonsense on a page aimed at someone scripting a
+   game. Write the note as `//` and the description as `///`, in either order — a note between the
+   two does not break the block:
+
+   ```cpp
+   // Fullname is a StringAnsiView and is not guaranteed to be null-terminated,
+   // so the length is passed explicitly.
+   /// The actor's scripting type name, suitable for passing back to Spawn.
+   actor.set_function("GetTypeName", [](const std::string& guid) -> std::string { ... });
+   ```
+
+   The same rule covers the table itself: the `///` comment above `create_named` is what the
+   domain's page says at the top, so every table wants one.
+
 ### Tags
 
-Written as `@tag` or `---@tag` (the LuaCATS spelling), inside `//` or `///` comments directly
-above the registration. A blank line ends the block.
+Written as `@tag` or `---@tag` (the LuaCATS spelling), inside a `///` comment directly above the
+registration. A blank line ends the block.
 
 | Tag | Meaning |
 | --- | --- |
@@ -118,16 +135,19 @@ than showing an empty argument list. That is the cue to add `@param` tags.
 
 ### Section banners
 
-The banner comments already used in the binding files become the module description:
+A banner rule is dropped rather than read as prose, so the section comments already used in the
+binding files can stay exactly as they are:
 
 ```cpp
-// ---- Apogee.Time --------------------------------------------------------
-// The frame clock. GetDeltaTime()/GetGameTime() are scaled by TimeScale and
-// stop advancing while the game is paused.
+/// ---- Apogee.Time --------------------------------------------------------
+/// The frame clock. GetDeltaTime()/GetGameTime() are scaled by TimeScale and
+/// stop advancing while the game is paused.
 sol::table time = apogee.create_named("Time");
 ```
 
 The first paragraph becomes the summary shown in listings; the rest becomes the remarks section.
+A rule is any line of three or more `-` or `=` that also ends in one, whatever label sits between
+them — the label names the section, which the page already has in its heading.
 
 ## Checking your work
 
